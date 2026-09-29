@@ -9,11 +9,20 @@ import { kUserContext } from './user'
 
 export const kInstances: InjectionKey<ReturnType<typeof useInstances>> = Symbol('Instances')
 
+// Keep these values in sync with lom/launcher.config.json. This profile is only
+// auto-provisioned when the launcher starts with a genuinely empty instance
+// state, so existing XMCL/LoM development profiles are never replaced.
+const LOM_PROFILE_NAME = 'Legends of Medieval'
+const LOM_RUNTIME = {
+  minecraft: '1.20.1',
+  forge: '47.4.22',
+} as const
+
 /**
  * Hook of a view of all instances & some deletion/selection functions
  */
 export function useInstances() {
-  const { getSharedInstancesState, editInstance, deleteInstance, validateInstancePath } = useService(InstanceServiceKey)
+  const { getSharedInstancesState, createInstance, editInstance, deleteInstance, validateInstancePath } = useService(InstanceServiceKey)
   const { state, isValidating, error } = useState(getSharedInstancesState, class extends InstanceState {
     constructor() {
       super()
@@ -125,37 +134,50 @@ export function useInstances() {
     }
     return allInstances.value.length === 0
   }
+
   watch(state, async (newVal, oldVal) => {
-    if (!newVal) return
-    if (!oldVal) {
-      // initialize
-      const lastSelectedPath = _path.value
+    if (!newVal || oldVal) return
 
-      const selectDefault = async () => {
-        // Select the first instance
-        const defaultPath = instances.value[0]?.path ?? ''
-        _path.value = defaultPath
-      }
+    const selectDefault = () => {
+      _path.value = instances.value[0]?.path ?? ''
+    }
 
-      if (lastSelectedPath) {
-        // Validate the last selected path
-        if (!instances.value.some(i => i.path === lastSelectedPath)) {
-          await selectDefault()
-        } else {
-          const badInstance = await validateInstancePath(lastSelectedPath)
-          if (badInstance) {
-            await selectDefault()
-          }
-        }
+    try {
+      // A brand-new LoM Launcher should never land on XMCL's generic empty
+      // state. Create the canonical profile before exposing `ready` to the
+      // router, then select it immediately.
+      if (newVal.instances.length === 0) {
+        const createdPath = await createInstance({
+          name: LOM_PROFILE_NAME,
+          runtime: { ...LOM_RUNTIME },
+        })
+        _path.value = createdPath
       } else {
-        // No selected, try to select the first instance
-        await selectDefault()
+        const lastSelectedPath = _path.value
+        if (lastSelectedPath) {
+          if (!instances.value.some(i => i.path === lastSelectedPath)) {
+            selectDefault()
+          } else {
+            const badInstance = await validateInstancePath(lastSelectedPath)
+            if (badInstance) selectDefault()
+          }
+        } else {
+          selectDefault()
+        }
       }
 
       path.value = _path.value
+    } catch (e) {
+      console.error('[LoM cold start] Failed to provision default instance', e)
+      // Keep the generic XMCL fallback usable if provisioning fails. This also
+      // prevents the renderer from being stuck forever in its initializing state.
+      selectDefault()
+      path.value = _path.value
+    } finally {
       initialized.value = true
     }
   })
+
   watch(path, (newPath) => {
     if (newPath !== _path.value) {
       // save to local storage
@@ -178,7 +200,10 @@ export function useInstances() {
     }
   })
 
-  const ready = computed(() => state.value !== undefined)
+  // `ready` means the initial profile selection/provisioning is complete, not
+  // merely that the shared service state has arrived. Context.ts relies on
+  // this to decide whether an empty launcher should redirect to /me.
+  const ready = computed(() => state.value !== undefined && initialized.value)
   const groups = computed(() => {
     const rawGroups = state.value?.groups ?? []
     const isOffline = userProfile?.value?.authority && userProfile?.value?.authority !== AUTHORITY_MICROSOFT
