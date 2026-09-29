@@ -89,12 +89,32 @@ const lomUpdateTesting = ref(false)
 const LOM_TEST_FILE_API = 'https://raw.githubusercontent.com/nondename/LoM-Launcher-XMCL/lom-updater-test-assets/lom-updater-test'
 
 function formatLomUpdaterError(error: unknown): string {
-  if (error instanceof Error) {
-    return [error.name, error.message, error.stack].filter(Boolean).join('\n')
+  const seen = new WeakSet<object>()
+  const normalize = (value: unknown): unknown => {
+    if (value === null || value === undefined || typeof value !== 'object') return value
+    if (seen.has(value as object)) return '[Circular]'
+    seen.add(value as object)
+    const source = value as Record<string, unknown>
+    const result: Record<string, unknown> = {}
+    for (const key of new Set([
+      ...Object.getOwnPropertyNames(value),
+      ...Object.keys(source),
+      'name', 'message', 'stack', 'cause', 'code', 'type', 'url', 'statusCode',
+      'httpBody', 'exception', 'error', 'details', 'installInstance',
+    ])) {
+      try {
+        const item = source[key]
+        if (item !== undefined) result[key] = normalize(item)
+      } catch {
+        result[key] = '[unreadable]'
+      }
+    }
+    return result
   }
-  if (typeof error === 'string') return error
   try {
-    return JSON.stringify(error, null, 2)
+    const normalized = normalize(error)
+    if (typeof normalized === 'string') return normalized
+    return JSON.stringify(normalized, null, 2) || String(error)
   } catch {
     return String(error)
   }
