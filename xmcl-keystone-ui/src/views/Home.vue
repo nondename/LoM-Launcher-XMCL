@@ -88,6 +88,18 @@ const updateService = useService(XUpdateServiceKey)
 const lomUpdateTesting = ref(false)
 const LOM_TEST_FILE_API = 'https://raw.githubusercontent.com/nondename/LoM-Launcher-XMCL/lom-updater-test-assets/lom-updater-test'
 
+function formatLomUpdaterError(error: unknown): string {
+  if (error instanceof Error) {
+    return [error.name, error.message, error.stack].filter(Boolean).join('\n')
+  }
+  if (typeof error === 'string') return error
+  try {
+    return JSON.stringify(error, null, 2)
+  } catch {
+    return String(error)
+  }
+}
+
 async function testLomUpdater() {
   if (!instance.value?.path || lomUpdateTesting.value) return
   lomUpdateTesting.value = true
@@ -96,8 +108,10 @@ async function testLomUpdater() {
     const result = await updateService.applyInstanceUpdate(instance.value.path)
     window.alert(result?.updates.length ? `LoM updater: применено файлов: ${result.updates.length}` : 'LoM updater: обновлений нет')
   } catch (e) {
+    const details = formatLomUpdaterError(e)
     console.error('[LoM updater test]', e)
-    window.alert(`LoM updater: ошибка: ${e instanceof Error ? e.message : String(e)}`)
+    console.error('[LoM updater test details]', details)
+    window.alert(`LoM updater: ошибка:\n${details}`)
   } finally {
     lomUpdateTesting.value = false
   }
