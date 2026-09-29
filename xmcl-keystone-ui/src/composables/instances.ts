@@ -6,17 +6,9 @@ import { useService } from './service'
 import { useState } from './syncableState'
 import { InstanceOrGroupData } from './instanceGroup'
 import { kUserContext } from './user'
+import { LOM_COLD_START_PENDING_KEY, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
 
 export const kInstances: InjectionKey<ReturnType<typeof useInstances>> = Symbol('Instances')
-
-// Keep these values in sync with lom/launcher.config.json. This profile is only
-// auto-provisioned when the launcher starts with a genuinely empty instance
-// state, so existing XMCL/LoM development profiles are never replaced.
-const LOM_PROFILE_NAME = 'Legends of Medieval'
-const LOM_RUNTIME = {
-  minecraft: '1.20.1',
-  forge: '47.4.22',
-} as const
 
 /**
  * Hook of a view of all instances & some deletion/selection functions
@@ -99,6 +91,7 @@ export function useInstances() {
   const allInstances = computed(() => state.value?.instances ?? [])
 
   const _path = useLocalStorage('selectedInstancePath', '' as string)
+  const coldStartPendingPath = useLocalStorage(LOM_COLD_START_PENDING_KEY, '' as string)
   const path = ref('')
   // Guard against `watch(instances)` clobbering the restored selection before
   // the async `watch(state)` initializer has finished. Without this, the
@@ -111,6 +104,7 @@ export function useInstances() {
 
   migrationBus.once((e) => {
     _path.value = _path.value.replace(e.oldRoot, e.newRoot)
+    coldStartPendingPath.value = coldStartPendingPath.value.replace(e.oldRoot, e.newRoot)
   })
 
   async function edit(options: EditInstanceOptions & { instancePath: string }) {
@@ -129,6 +123,7 @@ export function useInstances() {
     const index = instances.value.findIndex(i => i.path === instancePath)
     const lastSelected = path.value
     await deleteInstance(instancePath, deleteData)
+    if (coldStartPendingPath.value === instancePath) coldStartPendingPath.value = ''
     if (instancePath === lastSelected) {
       path.value = instances.value[Math.max(index - 1, 0)]?.path ?? ''
     }
@@ -149,8 +144,9 @@ export function useInstances() {
       if (newVal.instances.length === 0) {
         const createdPath = await createInstance({
           name: LOM_PROFILE_NAME,
-          runtime: { ...LOM_RUNTIME },
+          runtime: { ...LOM_PROFILE_RUNTIME },
         })
+        coldStartPendingPath.value = createdPath
         _path.value = createdPath
       } else {
         const lastSelectedPath = _path.value
