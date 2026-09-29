@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "launcher": {
+    "name": "Legends of Medieval Launcher",
+    "channel": "dev"
+  },
+  "profile": {
+    "id": "legends-of-medieval",
+    "name": "Legends of Medieval",
+    "minecraft": "1.20.1",
+    "loader": {
+      "type": "forge",
+      "version": "47.4.22"
+    },
+    "authentication": {
+      "mode": "offline",
+      "rememberUsername": true
+    },
+    "server": {
+      "address": "localhost",
+      "port": 25565,
+      "autoConnect": false
+    }
+  },
+  "distribution": {
+    "repository": "nondename/Minecraft-Legends-of-Medieval",
+    "branch": "dev",
+    "manifest": "https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json"
+  }
+}
