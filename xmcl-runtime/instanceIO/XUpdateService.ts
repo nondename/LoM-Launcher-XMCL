@@ -3,7 +3,7 @@ import type { InstanceFile } from '@xmcl/instance'
 import { InstanceIOException, XUpdateServiceKey, type XUpdateService as IXUpdateService, type InstanceManifest, type InstanceUpdate, type SetInstanceManifestOptions } from '@xmcl/runtime-api'
 import { randomUUID } from 'crypto'
 import { createReadStream } from 'fs'
-import { ensureDir, unlink, writeFile } from 'fs-extra'
+import { mkdir, rename, unlink, writeFile } from 'fs-extra'
 import { dirname, join } from 'path'
 import { Readable } from 'stream'
 import { Inject, LauncherAppKey, kTempDataPath } from '~/app'
@@ -12,9 +12,15 @@ import { AbstractService, ExposeServiceKey, Singleton } from '~/service'
 import { UserService } from '~/user'
 import { LauncherApp } from '../app/LauncherApp'
 import { missing } from '../util/fs'
-import { isValidUrl, joinUrl } from '../util/url'
+import { isValidUrl } from '../util/url'
 import { writeZipFile } from '../util/zip'
 import { ZipFile } from 'yazl'
+
+function joinFileApiUrl(base: string, relativePath: string): string {
+  const normalizedBase = base.endsWith('/') ? base : `${base}/`
+  const normalizedPath = relativePath.replace(/\\/g, '/').replace(/^\/+/, '')
+  return new URL(normalizedPath, normalizedBase).toString()
+}
 
 @ExposeServiceKey(XUpdateServiceKey)
 export class XUpdateService extends AbstractService implements IXUpdateService {
@@ -67,7 +73,7 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
     if (!instance.fileApi) return undefined
     const url = isValidUrl(instance.fileApi)
     if (!url || (url.protocol !== 'http:' && url.protocol !== 'https')) throw new InstanceIOException({ instancePath, type: 'instanceInvalidFileApi', url: instance.fileApi })
-    const manifestUrl = joinUrl(instance.fileApi, 'manifest.json')
+    const manifestUrl = joinFileApiUrl(instance.fileApi, 'manifest.json')
     let manifest: InstanceManifest
     try {
       const response = await this.app.fetch(manifestUrl)
@@ -82,7 +88,7 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
       const filePath = join(instancePath, file.path)
       if (await missing(filePath)) updates.push({ file, operation: 'add' })
       else if (await checksum(filePath, 'sha1') !== file.hashes.sha1) updates.push({ file, operation: 'update' })
-      const fileApiUrl = joinUrl(instance.fileApi, file.path)
+      const fileApiUrl = joinFileApiUrl(instance.fileApi, file.path)
       if (file.downloads) { if (!file.downloads.includes(fileApiUrl)) file.downloads.push(fileApiUrl) }
       else file.downloads = [fileApiUrl]
     }
@@ -93,21 +99,29 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
   async applyInstanceUpdate(path: string): Promise<InstanceUpdate | undefined> {
     const update = await this.fetchInstanceUpdate(path)
     if (!update || update.updates.length === 0) return update
-
-    for (const item of update.updates) {
-      const source = item.file.downloads?.[0]
-      if (!source) throw new Error(`LoM updater: no download URL for ${item.file.path}`)
-      const response = await this.app.fetch(source)
-      if (!response.ok) throw new Error(`LoM updater: HTTP ${response.status} for ${item.file.path}`)
-      const data = Buffer.from(await response.arrayBuffer())
-      const destination = join(path, item.file.path)
-      await ensureDir(dirname(destination))
-      await writeFile(destination, data)
-      const actual = await checksum(destination, 'sha1')
-      if (actual !== item.file.hashes.sha1) {
-        await unlink(destination).catch(() => undefined)
-        throw new Error(`LoM updater: checksum mismatch for ${item.file.path}`)
+    for (const { file } of update.updates) {
+      const destination = join(path, file.path)
+      const temp = `${destination}.lom-update`
+      await mkdir(dirname(destination), { recursive: true })
+      let lastError: unknown
+      for (const download of file.downloads ?? []) {
+        try {
+          const response = await this.app.fetch(download)
+          if (!response.ok) throw new Error(`HTTP ${response.status} while downloading ${download}`)
+          const bytes = Buffer.from(await response.arrayBuffer())
+          await writeFile(temp, bytes)
+          const actual = await checksum(temp, 'sha1')
+          if (actual !== file.hashes.sha1) throw new Error(`SHA-1 mismatch for ${file.path}: expected ${file.hashes.sha1}, got ${actual}`)
+          await unlink(destination).catch(() => undefined)
+          await rename(temp, destination)
+          lastError = undefined
+          break
+        } catch (e) {
+          lastError = e
+          await unlink(temp).catch(() => undefined)
+        }
       }
+      if (lastError) throw lastError
     }
     return update
   }
