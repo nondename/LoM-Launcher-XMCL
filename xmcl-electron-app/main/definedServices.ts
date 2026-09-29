@@ -25,6 +25,7 @@ import {
   InstanceIOService,
   InstanceInstallService,
   InstanceManifestService,
+  XUpdateService,
 } from '@xmcl/runtime/instanceIO'
 import { JavaService } from '@xmcl/runtime/java'
 import { LaunchService, VersionService } from '@xmcl/runtime/launch'
@@ -76,6 +77,7 @@ export const definedServices = [
   ServerService,
   ResourcePackPreviewService,
   InstanceManifestService,
+  XUpdateService,
   ServerStatusService,
   OfficialUserService,
   MinecraftFriendsService,
