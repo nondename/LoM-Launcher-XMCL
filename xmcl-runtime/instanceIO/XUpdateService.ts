@@ -3,8 +3,8 @@ import type { InstanceFile } from '@xmcl/instance'
 import { InstanceIOException, XUpdateServiceKey, type XUpdateService as IXUpdateService, type InstanceManifest, type InstanceUpdate, type SetInstanceManifestOptions } from '@xmcl/runtime-api'
 import { randomUUID } from 'crypto'
 import { createReadStream } from 'fs'
-import { unlink } from 'fs-extra'
-import { join } from 'path'
+import { ensureDir, unlink, writeFile } from 'fs-extra'
+import { dirname, join } from 'path'
 import { Readable } from 'stream'
 import { Inject, LauncherAppKey, kTempDataPath } from '~/app'
 import { InstanceService } from '~/instance'
@@ -15,14 +15,12 @@ import { missing } from '../util/fs'
 import { isValidUrl, joinUrl } from '../util/url'
 import { writeZipFile } from '../util/zip'
 import { ZipFile } from 'yazl'
-import { InstanceInstallService } from './InstanceInstallService'
 
 @ExposeServiceKey(XUpdateServiceKey)
 export class XUpdateService extends AbstractService implements IXUpdateService {
   constructor(@Inject(LauncherAppKey) app: LauncherApp,
     @Inject(InstanceService) private instanceService: InstanceService,
     @Inject(UserService) private userService: UserService,
-    @Inject(InstanceInstallService) private instanceInstallService: InstanceInstallService,
   ) { super(app) }
 
   private async getAccessToken(userId: string): Promise<string> { throw new Error('Unimplemented') }
@@ -95,12 +93,22 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
   async applyInstanceUpdate(path: string): Promise<InstanceUpdate | undefined> {
     const update = await this.fetchInstanceUpdate(path)
     if (!update || update.updates.length === 0) return update
-    await this.instanceInstallService.installInstanceFiles({
-      path,
-      oldFiles: update.updates.filter(u => u.operation === 'update').map(u => u.file),
-      files: update.updates.map(u => u.file),
-      id: 'lom-instance-update',
-    })
+
+    for (const item of update.updates) {
+      const source = item.file.downloads?.[0]
+      if (!source) throw new Error(`LoM updater: no download URL for ${item.file.path}`)
+      const response = await this.app.fetch(source)
+      if (!response.ok) throw new Error(`LoM updater: HTTP ${response.status} for ${item.file.path}`)
+      const data = Buffer.from(await response.arrayBuffer())
+      const destination = join(path, item.file.path)
+      await ensureDir(dirname(destination))
+      await writeFile(destination, data)
+      const actual = await checksum(destination, 'sha1')
+      if (actual !== item.file.hashes.sha1) {
+        await unlink(destination).catch(() => undefined)
+        throw new Error(`LoM updater: checksum mismatch for ${item.file.path}`)
+      }
+    }
     return update
   }
 }
