@@ -1,6 +1,6 @@
 import { checksum } from '@xmcl/core'
 import type { InstanceFile } from '@xmcl/instance'
-import { InstanceIOException, XUpdateServiceKey, type XUpdateService as IXUpdateService, type InstanceManifest, type InstanceUpdate, type SetInstanceManifestOptions } from '@xmcl/runtime-api'
+import { InstanceIOException, XUpdateServiceKey, type XUpdateService as IXUpdateService, type InstanceManifest, type InstanceUpdate, type SetInstanceManifestOptions, type LoMUpdateProgress, type LoMUpdateResult, type LoMUpdateStatus } from '@xmcl/runtime-api'
 import { randomUUID } from 'crypto'
 import { createReadStream } from 'fs'
 import { mkdir, rename, unlink, writeFile } from 'fs-extra'
@@ -15,6 +15,7 @@ import { missing } from '../util/fs'
 import { isValidUrl } from '../util/url'
 import { writeZipFile } from '../util/zip'
 import { ZipFile } from 'yazl'
+import { LoMUpdateService } from './LoMUpdateService'
 
 function joinFileApiUrl(base: string, relativePath: string): string {
   const normalizedBase = base.endsWith('/') ? base : `${base}/`
@@ -30,6 +31,22 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
   ) { super(app) }
 
   private async getAccessToken(userId: string): Promise<string> { throw new Error('Unimplemented') }
+
+  private async getLoMUpdater(): Promise<LoMUpdateService> {
+    return this.app.registry.getOrCreate(LoMUpdateService)
+  }
+
+  async checkLoMUpdate(path: string): Promise<LoMUpdateStatus> {
+    return (await this.getLoMUpdater()).check(path)
+  }
+
+  async applyLoMUpdate(path: string): Promise<LoMUpdateResult> {
+    return (await this.getLoMUpdater()).update(path)
+  }
+
+  async getLoMUpdateProgress(): Promise<LoMUpdateProgress> {
+    return (await this.getLoMUpdater()).getProgress()
+  }
 
   @Singleton((o) => o.path)
   async uploadInstanceManifest({ path, manifest, headers, includeFileWithDownloads, forceJsonFormat }: SetInstanceManifestOptions): Promise<void> {

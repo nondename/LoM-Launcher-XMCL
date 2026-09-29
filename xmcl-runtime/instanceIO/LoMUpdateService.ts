@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import { mkdir, readFile, rename, unlink, writeFile } from 'fs-extra'
-import { dirname, join, normalize, resolve } from 'path'
+import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'path'
 import { Inject, LauncherAppKey } from '~/app'
 import { AbstractService } from '~/service'
 import { LauncherApp } from '../app/LauncherApp'
@@ -24,24 +24,32 @@ export type LoMUpdateResult = {
   deleted: number
 }
 
+export type LoMUpdateStatus = {
+  available: boolean
+  remoteVersion: string
+  installedVersion?: string
+}
+
 export type LoMUpdateProgress = {
-  phase: 'idle' | 'checking' | 'downloading' | 'installing' | 'done'
+  phase: 'idle' | 'checking' | 'downloading' | 'installing' | 'done' | 'error'
   filesDone: number
   filesTotal: number
   bytesDone: number
   bytesTotal: number
   bytesPerSecond: number
   currentFile?: string
+  error?: string
 }
 
 const MANIFEST_URL = process.env.LOM_UPDATE_MANIFEST_URL || 'https://raw.githubusercontent.com/nondename/LoM-Launcher-XMCL/lom-updater-test-assets/lom-update/manifest.json'
 
-function safePath(root: string, relative: string) {
-  const normalized = normalize(relative).replace(/^([/\\])+/, '')
-  const target = resolve(root, normalized)
-  const base = resolve(root) + '\\'
-  if (target !== resolve(root) && !target.toLowerCase().startsWith(base.toLowerCase())) {
-    throw new Error(`Unsafe LoM update path: ${relative}`)
+function safePath(root: string, filePath: string) {
+  const normalized = normalize(filePath).replace(/^([/\\])+/, '')
+  const base = resolve(root)
+  const target = resolve(base, normalized)
+  const fromBase = relative(base, target)
+  if (fromBase === '..' || fromBase.startsWith(`..${sep}`) || isAbsolute(fromBase)) {
+    throw new Error(`Unsafe LoM update path: ${filePath}`)
   }
   return target
 }
@@ -69,16 +77,7 @@ export class LoMUpdateService extends AbstractService {
     Object.assign(this.progress, patch)
   }
 
-  update(instancePath: string): Promise<LoMUpdateResult> {
-    const current = this.running.get(instancePath)
-    if (current) return current
-    const task = this.doUpdate(instancePath).finally(() => this.running.delete(instancePath))
-    this.running.set(instancePath, task)
-    return task
-  }
-
-  private async doUpdate(instancePath: string): Promise<LoMUpdateResult> {
-    this.progress = { phase: 'checking', filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0 }
+  private async fetchManifest(): Promise<LoMManifest> {
     this.log(`[LoM Updater] Fetch manifest: ${MANIFEST_URL}`)
     const manifestResponse = await this.app.fetch(MANIFEST_URL, { cache: 'no-store' })
     if (!manifestResponse.ok) throw new Error(`[LoM Updater] Manifest HTTP ${manifestResponse.status}: ${MANIFEST_URL}`)
@@ -86,6 +85,42 @@ export class LoMUpdateService extends AbstractService {
     if (!manifest || typeof manifest.version !== 'string' || !Array.isArray(manifest.files)) {
       throw new Error('[LoM Updater] Invalid manifest')
     }
+    return manifest
+  }
+
+  async check(instancePath: string): Promise<LoMUpdateStatus> {
+    const manifest = await this.fetchManifest()
+    let installedVersion: string | undefined
+    try {
+      const state = JSON.parse(await readFile(join(instancePath, '.lom-update.json'), 'utf8')) as { version?: unknown }
+      if (typeof state.version === 'string') installedVersion = state.version
+    } catch {
+      // No local LoM updater state yet. The first update will validate files and create it.
+    }
+    return {
+      available: installedVersion !== manifest.version,
+      remoteVersion: manifest.version,
+      installedVersion,
+    }
+  }
+
+  update(instancePath: string): Promise<LoMUpdateResult> {
+    const current = this.running.get(instancePath)
+    if (current) return current
+    const task = this.doUpdate(instancePath)
+      .catch((e) => {
+        const error = e instanceof Error ? e.message : String(e)
+        this.setProgress({ phase: 'error', error, currentFile: undefined, bytesPerSecond: 0 })
+        throw e
+      })
+      .finally(() => this.running.delete(instancePath))
+    this.running.set(instancePath, task)
+    return task
+  }
+
+  private async doUpdate(instancePath: string): Promise<LoMUpdateResult> {
+    this.progress = { phase: 'checking', filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0 }
+    const manifest = await this.fetchManifest()
 
     const manifestBase = new URL('.', MANIFEST_URL)
     const pending: LoMManifestFile[] = []
@@ -129,12 +164,12 @@ export class LoMUpdateService extends AbstractService {
     }
 
     this.setProgress({ phase: 'installing', currentFile: undefined })
-    for (const relative of manifest.delete ?? []) {
-      const target = safePath(instancePath, relative)
+    for (const relativePath of manifest.delete ?? []) {
+      const target = safePath(instancePath, relativePath)
       try {
         await unlink(target)
         deleted++
-        this.log(`[LoM Updater] Delete ${relative}`)
+        this.log(`[LoM Updater] Delete ${relativePath}`)
       } catch (e: any) {
         if (e?.code !== 'ENOENT') throw e
       }
@@ -142,7 +177,7 @@ export class LoMUpdateService extends AbstractService {
 
     const statePath = join(instancePath, '.lom-update.json')
     await writeFile(statePath, JSON.stringify({ version: manifest.version, updatedAt: new Date().toISOString() }, null, 2), 'utf8')
-    this.setProgress({ phase: 'done' })
+    this.setProgress({ phase: 'done', error: undefined, currentFile: undefined, bytesPerSecond: 0 })
     this.log(`[LoM Updater] Ready version=${manifest.version}, changed=${changed}, deleted=${deleted}`)
     return { version: manifest.version, changed, deleted }
   }

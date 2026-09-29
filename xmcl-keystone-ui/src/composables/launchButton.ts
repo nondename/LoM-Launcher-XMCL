@@ -16,6 +16,7 @@ import { kLaunchTask } from './launchTask'
 import { TaskState, BedrockServiceKey } from '@xmcl/runtime-api'
 import { useService } from './service'
 import { useTask } from './task'
+import { useLomUpdate } from './lomUpdate'
 import { withRendererAction, type RendererActionScope } from '@/rendererAction'
 
 export interface LaunchMenuItem {
@@ -37,6 +38,13 @@ export function useLaunchButton() {
   const { path } = injection(kInstance)
   const { instance } = injection(kInstance)
   const isBedrock = computed(() => isBedrockInstance(instance.value))
+  const {
+    progress: lomUpdateProgress,
+    buttonText: lomUpdateButtonText,
+    buttonLoading: lomUpdateButtonLoading,
+    actionable: lomUpdateActionable,
+    run: runLomUpdate,
+  } = useLomUpdate()
 
   const {
     getInstallation,
@@ -176,6 +184,7 @@ export function useLaunchButton() {
     right?: boolean
     menu?: LaunchMenuItem[]
     actionName?: string
+    skipPreclick?: boolean
     onClick: (instancePath: string, action?: RendererActionScope) => void | Promise<void>
   }>({
     text: t('launch.launch'),
@@ -209,6 +218,8 @@ export function useLaunchButton() {
       isInstalling,
       installPercentage,
       bedrockGameRunning,
+      lomUpdateButtonText,
+      lomUpdateActionable,
       // Rebuild the facade when the diagnosis items themselves change (e.g. the
       // unresolved-file count drops from 3 to 1). The `issues` bitmask stays
       // the same in that case, so without this the cached `menu` text is stale.
@@ -345,6 +356,17 @@ export function useLaunchButton() {
             ])
           },
         }
+      } else if (lomUpdateButtonText.value) {
+        const failed = lomUpdateProgress.value.phase === 'error'
+        launchButtonFacade.value = {
+          text: lomUpdateButtonText.value,
+          color: failed ? 'orange' : 'primary',
+          leftIcon: lomUpdateActionable.value ? 'system_update_alt' : undefined,
+          skipPreclick: true,
+          onClick: lomUpdateActionable.value
+            ? async (instancePath) => { await runLomUpdate(instancePath) }
+            : () => {},
+        }
       } else {
         launchButtonFacade.value = {
           text: t('launch.launch'),
@@ -384,7 +406,8 @@ export function useLaunchButton() {
       isRefreshingVersion.value ||
       loadingInstanceFiles.value ||
       fixingInstance.value ||
-      checkingBedrock.value,
+      checkingBedrock.value ||
+      lomUpdateButtonLoading.value,
   )
 
   const leftIcon = computed(() => launchButtonFacade.value.leftIcon)
@@ -415,15 +438,17 @@ export function useLaunchButton() {
     if ((loading.value || transition.value) && !launching.value) return
     const instancePath = path.value
     if (!instancePath) return
-    for (const listener of listeners) {
-      try {
-        await listener()
-      } catch {
-        return
+    const facade = launchButtonFacade.value
+    if (!facade.skipPreclick) {
+      for (const listener of listeners) {
+        try {
+          await listener()
+        } catch {
+          return
+        }
       }
     }
     if (path.value !== instancePath) return
-    const facade = launchButtonFacade.value
     if (facade.actionName) {
       await withRendererAction(
         facade.actionName,

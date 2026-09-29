@@ -18,11 +18,40 @@ export interface SetInstanceManifestOptions {
   forceJsonFormat?: boolean
 }
 
+export interface LoMUpdateResult {
+  version: string
+  changed: number
+  deleted: number
+}
+
+export interface LoMUpdateStatus {
+  available: boolean
+  remoteVersion: string
+  installedVersion?: string
+}
+
+export interface LoMUpdateProgress {
+  phase: 'idle' | 'checking' | 'downloading' | 'installing' | 'done' | 'error'
+  filesDone: number
+  filesTotal: number
+  bytesDone: number
+  bytesTotal: number
+  bytesPerSecond: number
+  currentFile?: string
+  error?: string
+}
+
 export interface XUpdateService {
   /** Fetch the remote manifest and compare it with the current instance. */
   fetchInstanceUpdate(path: string): Promise<InstanceUpdate | undefined>
   /** Fetch, stage and apply all add/update operations from the remote manifest. */
   applyInstanceUpdate(path: string): Promise<InstanceUpdate | undefined>
+  /** Compare the installed LoM revision with the remote LoM manifest revision. */
+  checkLoMUpdate(path: string): Promise<LoMUpdateStatus>
+  /** Apply the dedicated LoM manifest update. */
+  applyLoMUpdate(path: string): Promise<LoMUpdateResult>
+  /** Read current LoM updater progress. */
+  getLoMUpdateProgress(): Promise<LoMUpdateProgress>
   uploadInstanceManifest(options: SetInstanceManifestOptions): Promise<void>
 }
 
