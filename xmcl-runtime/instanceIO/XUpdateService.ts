@@ -1,6 +1,6 @@
 import { checksum } from '@xmcl/core'
 import type { InstanceFile } from '@xmcl/instance'
-import { InstanceIOException, type XUpdateService as IXUpdateService, type InstanceManifest, type InstanceUpdate, type SetInstanceManifestOptions } from '@xmcl/runtime-api'
+import { InstanceIOException, XUpdateServiceKey, type XUpdateService as IXUpdateService, type InstanceManifest, type InstanceUpdate, type SetInstanceManifestOptions } from '@xmcl/runtime-api'
 import { randomUUID } from 'crypto'
 import { createReadStream } from 'fs'
 import { unlink } from 'fs-extra'
@@ -8,7 +8,7 @@ import { join } from 'path'
 import { Readable } from 'stream'
 import { Inject, LauncherAppKey, kTempDataPath } from '~/app'
 import { InstanceService } from '~/instance'
-import { AbstractService, Singleton } from '~/service'
+import { AbstractService, ExposeServiceKey, Singleton } from '~/service'
 import { UserService } from '~/user'
 import { LauncherApp } from '../app/LauncherApp'
 import { missing } from '../util/fs'
@@ -16,6 +16,7 @@ import { isValidUrl, joinUrl } from '../util/url'
 import { writeZipFile } from '../util/zip'
 import { ZipFile } from 'yazl'
 
+@ExposeServiceKey(XUpdateServiceKey)
 export class XUpdateService extends AbstractService implements IXUpdateService {
   constructor(@Inject(LauncherAppKey) app: LauncherApp,
     @Inject(InstanceService) private instanceService: InstanceService,
@@ -109,19 +110,32 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
 
     const instance = this.instanceService.state.all[instancePath]
 
+    if (!instance) {
+      throw new InstanceIOException({ instancePath, type: 'instanceNotFound' })
+    }
+
     if (!instance.fileApi) {
       return undefined
     }
 
+    const url = isValidUrl(instance.fileApi)
+    if (!url || (url.protocol !== 'http:' && url.protocol !== 'https')) {
+      throw new InstanceIOException({ instancePath, type: 'instanceInvalidFileApi', url: instance.fileApi })
+    }
+
     let manifest: InstanceManifest
     try {
-      manifest = await (await this.app.fetch(instance.fileApi)).json() as any
+      const response = await this.app.fetch(instance.fileApi)
+      if (!response.ok) {
+        throw Object.assign(new Error(`Failed to fetch instance manifest: ${response.status}`), { response })
+      }
+      manifest = await response.json() as any
     } catch (e) {
       if (e instanceof Error) this.error(e)
       throw new InstanceIOException({
         type: 'instanceNotFoundInApi',
         url: instance.fileApi,
-        statusCode: (e as any)?.response?.statusCode,
+        statusCode: (e as any)?.response?.status ?? (e as any)?.response?.statusCode,
       })
     }
 
@@ -149,7 +163,7 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
         await lookupFile(file.path, file.hashes.sha1, file)
         const fileApiUrl = joinUrl(instance.fileApi, file.path)
         if (file.downloads) {
-          file.downloads.push(fileApiUrl)
+          if (!file.downloads.includes(fileApiUrl)) file.downloads.push(fileApiUrl)
         } else {
           file.downloads = [fileApiUrl]
         }
