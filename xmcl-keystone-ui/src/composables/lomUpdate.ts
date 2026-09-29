@@ -2,6 +2,7 @@ import { injection } from '@/util/inject'
 import { isBedrockInstance } from '@xmcl/instance'
 import { XUpdateServiceKey, type LoMUpdateProgress, type LoMUpdateStatus } from '@xmcl/runtime-api'
 import { kInstance } from './instance'
+import { isLoMProfile } from './lomProfile'
 import { useService } from './service'
 
 const idleProgress = (): LoMUpdateProgress => ({
@@ -24,6 +25,7 @@ function createLomUpdate() {
   const checking = ref(false)
 
   const isBedrock = computed(() => isBedrockInstance(instance.value))
+  const isLoM = computed(() => isLoMProfile(instance.value))
   const updating = computed(() =>
     progress.value.phase === 'checking' ||
     progress.value.phase === 'downloading' ||
@@ -41,6 +43,7 @@ function createLomUpdate() {
   })
 
   const buttonText = computed<string | undefined>(() => {
+    if (!isLoM.value) return undefined
     if (initialChecking.value) return 'Проверка обновлений…'
     switch (progress.value.phase) {
       case 'checking': return 'Проверка обновлений…'
@@ -52,21 +55,21 @@ function createLomUpdate() {
     return undefined
   })
 
-  const buttonLoading = computed(() => initialChecking.value || updating.value)
-  const actionable = computed(() =>
+  const buttonLoading = computed(() => isLoM.value && (initialChecking.value || updating.value))
+  const actionable = computed(() => isLoM.value && (
     progress.value.phase === 'error' ||
-    (!!status.value?.available && !buttonLoading.value),
-  )
+    (!!status.value?.available && !buttonLoading.value)
+  ))
 
   let statusRequest = 0
   async function refresh() {
     const instancePath = path.value
-    if (!instancePath || isBedrock.value || updating.value) return
+    if (!instancePath || !isLoM.value || isBedrock.value || updating.value) return
     const request = ++statusRequest
     checking.value = true
     try {
       const next = await checkLoMUpdate(instancePath)
-      if (request === statusRequest && path.value === instancePath) status.value = next
+      if (request === statusRequest && path.value === instancePath && isLoM.value) status.value = next
     } catch (e) {
       console.error('[LoM updater] Failed to check update status', e)
     } finally {
@@ -75,6 +78,7 @@ function createLomUpdate() {
   }
 
   async function syncProgress() {
+    if (!isLoM.value) return
     try {
       progress.value = await getLoMUpdateProgress()
     } catch (e) {
@@ -84,7 +88,7 @@ function createLomUpdate() {
 
   let progressTimer: ReturnType<typeof setInterval> | undefined
   async function run(instancePath = path.value) {
-    if (!instancePath || isBedrock.value || updating.value) return
+    if (!instancePath || !isLoM.value || isBedrock.value || updating.value) return
     progress.value = { ...idleProgress(), phase: 'checking' }
     if (progressTimer) clearInterval(progressTimer)
     progressTimer = setInterval(() => { void syncProgress() }, 250)
@@ -102,13 +106,17 @@ function createLomUpdate() {
     }
   }
 
-  watch([path, isBedrock], () => {
+  watch([path, isBedrock, isLoM], () => {
     status.value = undefined
     progress.value = idleProgress()
-    void refresh()
+    checking.value = false
+    statusRequest++
+    if (isLoM.value) void refresh()
   }, { immediate: true })
 
-  setInterval(() => { void refresh() }, 60_000)
+  setInterval(() => {
+    if (isLoM.value) void refresh()
+  }, 60_000)
 
   return {
     status,
