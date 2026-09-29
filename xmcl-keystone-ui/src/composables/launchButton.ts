@@ -1,6 +1,7 @@
 import { injection } from '@/util/inject'
 import { isBedrockInstance } from '@xmcl/instance'
 import { InjectionKey } from 'vue'
+import { useLocalStorage } from '@vueuse/core'
 import { useDialog } from './dialog'
 import { kInstance } from './instance'
 import { kInstanceFiles } from './instanceFiles'
@@ -17,6 +18,7 @@ import { TaskState, BedrockServiceKey } from '@xmcl/runtime-api'
 import { useService } from './service'
 import { useTask } from './task'
 import { useLomUpdate } from './lomUpdate'
+import { LOM_COLD_START_PENDING_KEY, isLoMProfile } from './lomProfile'
 import { withRendererAction, type RendererActionScope } from '@/rendererAction'
 
 export interface LaunchMenuItem {
@@ -38,7 +40,9 @@ export function useLaunchButton() {
   const { path } = injection(kInstance)
   const { instance } = injection(kInstance)
   const isBedrock = computed(() => isBedrockInstance(instance.value))
+  const coldStartPendingPath = useLocalStorage(LOM_COLD_START_PENDING_KEY, '' as string)
   const {
+    status: lomUpdateStatus,
     progress: lomUpdateProgress,
     buttonText: lomUpdateButtonText,
     buttonLoading: lomUpdateButtonLoading,
@@ -408,6 +412,84 @@ export function useLaunchButton() {
       fixingInstance.value ||
       checkingBedrock.value ||
       lomUpdateButtonLoading.value,
+  )
+
+  // Drive the native XMCL repair/install stage and then the LoM manifest stage
+  // only for the exact profile created by the empty-state cold start. Each
+  // diagnosis signature is attempted automatically once; on a persistent
+  // failure the normal Install/Retry button remains available instead of
+  // creating an unattended retry loop.
+  let coldStartRunning = false
+  let lastColdStartAttempt = ''
+  async function driveLoMColdStart() {
+    if (coldStartRunning) return
+    const instancePath = path.value
+    if (!instancePath || coldStartPendingPath.value !== instancePath) return
+    if (!isLoMProfile(instance.value) || isBedrock.value) return
+    if (transition.value || loading.value || hasTaskRunning.value || hasGameRunning.value) return
+
+    if (issues.value) {
+      const attempt = `repair:${instancePath}:${issues.value}`
+      if (lastColdStartAttempt === attempt) return
+      lastColdStartAttempt = attempt
+      coldStartRunning = true
+      try {
+        await Promise.allSettled([
+          fixVersionIssues(instancePath),
+          fixInstanceFileIssue(instancePath),
+        ])
+      } finally {
+        coldStartRunning = false
+        queueMicrotask(() => { void driveLoMColdStart() })
+      }
+      return
+    }
+
+    if (lomUpdateProgress.value.phase === 'error') return
+
+    if (lomUpdateActionable.value) {
+      const attempt = `update:${instancePath}:${lomUpdateStatus.value?.remoteVersion ?? 'unknown'}`
+      if (lastColdStartAttempt === attempt) return
+      lastColdStartAttempt = attempt
+      coldStartRunning = true
+      try {
+        await runLomUpdate(instancePath)
+        if (
+          coldStartPendingPath.value === instancePath &&
+          (lomUpdateProgress.value.phase === 'done' || lomUpdateStatus.value?.available === false)
+        ) {
+          coldStartPendingPath.value = ''
+          lastColdStartAttempt = ''
+        }
+      } finally {
+        coldStartRunning = false
+        queueMicrotask(() => { void driveLoMColdStart() })
+      }
+      return
+    }
+
+    if (lomUpdateProgress.value.phase === 'done' || lomUpdateStatus.value?.available === false) {
+      coldStartPendingPath.value = ''
+      lastColdStartAttempt = ''
+    }
+  }
+
+  watch(
+    [
+      path,
+      instance,
+      coldStartPendingPath,
+      transition,
+      loading,
+      hasTaskRunning,
+      hasGameRunning,
+      issues,
+      lomUpdateActionable,
+      lomUpdateStatus,
+      () => lomUpdateProgress.value.phase,
+    ],
+    () => { void driveLoMColdStart() },
+    { immediate: true },
   )
 
   const leftIcon = computed(() => launchButtonFacade.value.leftIcon)
