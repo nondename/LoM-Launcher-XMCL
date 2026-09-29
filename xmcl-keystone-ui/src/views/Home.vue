@@ -6,6 +6,16 @@
     v-context-menu="isFocus ? getFocusBackgroundMenu : undefined"
   >
     <HomeCriticalError />
+    <div v-if="!isBedrock" class="absolute right-4 top-4 z-20">
+      <v-btn
+        color="primary"
+        variant="outlined"
+        :loading="lomUpdateTesting"
+        @click="testLomUpdater"
+      >
+        Тест обновления LoM
+      </v-btn>
+    </div>
     <transition name="slide-y-reverse-transition" mode="out-in">
       <div v-if="!isFocus" class="mx-3 relative">
         <Transition name="slide-y-reverse-transition">
@@ -55,9 +65,11 @@ import { kCompact } from '@/composables/scrollTop'
 import { useTutorial } from '@/composables/tutorial'
 import { useInFocusMode } from '@/composables/uiLayout'
 import { useHomeFocusCards } from '@/composables/homeCards'
+import { useService } from '@/composables/service'
 import { vContextMenu } from '@/directives/contextMenu'
 import { injection } from '@/util/inject'
 import { isBedrockInstance } from '@xmcl/instance'
+import { InstanceServiceKey, XUpdateServiceKey } from '@xmcl/runtime-api'
 import type { DriveStep } from 'driver.js'
 import HomeCriticalError from './HomeCriticalError.vue'
 import HomeFocusFooter from './HomeFocusFooterV2.vue'
@@ -71,6 +83,25 @@ const isFocus = useInFocusMode()
 const { getBackgroundMenu: getFocusBackgroundMenu } = useHomeFocusCards()
 const { instance } = injection(kInstance)
 const isBedrock = computed(() => isBedrockInstance(instance.value))
+const instanceService = useService(InstanceServiceKey)
+const updateService = useService(XUpdateServiceKey)
+const lomUpdateTesting = ref(false)
+const LOM_TEST_FILE_API = 'https://raw.githubusercontent.com/nondename/LoM-Launcher-XMCL/lom-updater-test-assets/lom-updater-test'
+
+async function testLomUpdater() {
+  if (!instance.value?.path || lomUpdateTesting.value) return
+  lomUpdateTesting.value = true
+  try {
+    await instanceService.editInstance({ instancePath: instance.value.path, fileApi: LOM_TEST_FILE_API })
+    const result = await updateService.applyInstanceUpdate(instance.value.path)
+    window.alert(result?.updates.length ? `LoM updater: применено файлов: ${result.updates.length}` : 'LoM updater: обновлений нет')
+  } catch (e) {
+    console.error('[LoM updater test]', e)
+    window.alert(`LoM updater: ошибка: ${e instanceof Error ? e.message : String(e)}`)
+  } finally {
+    lomUpdateTesting.value = false
+  }
+}
 
 watch(isBedrock, (bedrock) => {
   if (bedrock) {
@@ -114,7 +145,6 @@ const { t } = useI18n()
 
 import { useLaunchButton } from '@/composables/launchButton'
 
-// Gamepad face-button actions scoped to the home page (auto-unregister on leave).
 const router = useRouter()
 const { text: launchText, onClick: onLaunchClick } = useLaunchButton()
 useGamepadAction('X', {
