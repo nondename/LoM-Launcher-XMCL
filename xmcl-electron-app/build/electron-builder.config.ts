@@ -5,15 +5,15 @@ import type { Configuration } from 'electron-builder'
 dotenv()
 
 export const config = {
-  productName: 'XMCL',
-  appId: 'xmcl',
+  productName: 'LoM Launcher',
+  appId: 'lom-launcher',
   directories: {
     output: 'build/output',
     buildResources: 'build',
     app: '.',
   },
   protocols: {
-    name: 'XMCL',
+    name: 'LoM Launcher',
     schemes: ['xmcl'],
   },
   // assign publish for auto-updater
@@ -39,9 +39,9 @@ export const config = {
   }],
   artifactName: 'xmcl-${version}-${platform}-${arch}.${ext}',
   appx: {
-    displayName: 'XMCL',
-    applicationId: 'xmcl',
-    identityName: 'xmcl',
+    displayName: 'LoM Launcher',
+    applicationId: 'lomlauncher',
+    identityName: 'lomlauncher',
     backgroundColor: 'transparent',
     publisher: process.env.PUBLISHER,
     publisherDisplayName: 'CI010',

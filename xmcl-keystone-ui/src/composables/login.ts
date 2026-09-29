@@ -93,7 +93,7 @@ export function useAuthorityItems(authorities: Ref<AuthorityMetadata[] | undefin
     if (!authorities.value) return []
     const result = [] as AuthorityItem[]
     for (const v of authorities.value) {
-      if (!thirdParty.value && v.authority !== AUTHORITY_MICROSOFT) continue
+      if (!thirdParty.value && v.authority !== AUTHORITY_MICROSOFT && v.authority !== AUTHORITY_DEV) continue
       if (v.authority === AUTHORITY_MICROSOFT) {
         result.push({
           value: AUTHORITY_MICROSOFT,
