@@ -23,13 +23,9 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
     @Inject(InstanceService) private instanceService: InstanceService,
     @Inject(UserService) private userService: UserService,
     @Inject(InstanceInstallService) private instanceInstallService: InstanceInstallService,
-  ) {
-    super(app)
-  }
+  ) { super(app) }
 
-  private async getAccessToken(userId: string): Promise<string> {
-    throw new Error('Unimplemented')
-  }
+  private async getAccessToken(userId: string): Promise<string> { throw new Error('Unimplemented') }
 
   @Singleton((o) => o.path)
   async uploadInstanceManifest({ path, manifest, headers, includeFileWithDownloads, forceJsonFormat }: SetInstanceManifestOptions): Promise<void> {
@@ -39,7 +35,6 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
     if (!instance.fileApi) throw new InstanceIOException({ instancePath, type: 'instanceHasNoFileApi' })
     const url = isValidUrl(instance.fileApi)
     if (!url || (url.protocol !== 'http:' && url.protocol !== 'https')) throw new InstanceIOException({ instancePath, type: 'instanceInvalidFileApi', url: instance.fileApi })
-
     const getTemp = await this.app.registry.get(kTempDataPath)
     const tempZipFile = getTemp(randomUUID())
     const useJson = forceJsonFormat || manifest.files.every(f => f.modrinth || f.curseforge || (f.downloads && f.downloads.length > 0))
@@ -53,7 +48,6 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
       zipFile.addBuffer(Buffer.from(JSON.stringify(manifest), 'utf-8'), 'manifest.json')
       await writeZipFile(zipFile, tempZipFile)
     }
-
     try {
       const allHeaders = headers ? { ...headers } : {}
       if (!allHeaders.Authorization) {
@@ -61,15 +55,10 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
         allHeaders.Authorization = `Bearer ${token}`
       }
       allHeaders['content-type'] = useJson ? 'application/json' : 'application/zip'
-      const res = await this.app.fetch(instance.fileApi, {
-        method: 'POST', headers: allHeaders,
-        body: useJson ? JSON.stringify(manifest) : Readable.toWeb(createReadStream(tempZipFile)) as any,
-      })
+      const res = await this.app.fetch(instance.fileApi, { method: 'POST', headers: allHeaders, body: useJson ? JSON.stringify(manifest) : Readable.toWeb(createReadStream(tempZipFile)) as any })
       if (res.status !== 201) throw new InstanceIOException({ type: 'instanceSetManifestFailed', httpBody: res.body, statusCode: res.status })
       if (res.body) for await (const _ of Readable.from(res.body as any)) { /* drain */ }
-    } finally {
-      await unlink(tempZipFile).catch(() => undefined)
-    }
+    } finally { await unlink(tempZipFile).catch(() => undefined) }
   }
 
   @Singleton(p => p)
@@ -80,31 +69,24 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
     if (!instance.fileApi) return undefined
     const url = isValidUrl(instance.fileApi)
     if (!url || (url.protocol !== 'http:' && url.protocol !== 'https')) throw new InstanceIOException({ instancePath, type: 'instanceInvalidFileApi', url: instance.fileApi })
-
+    const manifestUrl = joinUrl(instance.fileApi, 'manifest.json')
     let manifest: InstanceManifest
     try {
-      const response = await this.app.fetch(instance.fileApi)
+      const response = await this.app.fetch(manifestUrl)
       if (!response.ok) throw Object.assign(new Error(`Failed to fetch instance manifest: ${response.status}`), { response })
       manifest = await response.json() as any
     } catch (e) {
       if (e instanceof Error) this.error(e)
-      throw new InstanceIOException({ type: 'instanceNotFoundInApi', url: instance.fileApi, statusCode: (e as any)?.response?.status ?? (e as any)?.response?.statusCode })
+      throw new InstanceIOException({ type: 'instanceNotFoundInApi', url: manifestUrl, statusCode: (e as any)?.response?.status ?? (e as any)?.response?.statusCode })
     }
-
     const updates: InstanceUpdate['updates'] = []
     for (const file of manifest.files ?? []) {
       const filePath = join(instancePath, file.path)
-      if (await missing(filePath)) {
-        updates.push({ file, operation: 'add' })
-      } else if (await checksum(filePath, 'sha1') !== file.hashes.sha1) {
-        updates.push({ file, operation: 'update' })
-      }
+      if (await missing(filePath)) updates.push({ file, operation: 'add' })
+      else if (await checksum(filePath, 'sha1') !== file.hashes.sha1) updates.push({ file, operation: 'update' })
       const fileApiUrl = joinUrl(instance.fileApi, file.path)
-      if (file.downloads) {
-        if (!file.downloads.includes(fileApiUrl)) file.downloads.push(fileApiUrl)
-      } else {
-        file.downloads = [fileApiUrl]
-      }
+      if (file.downloads) { if (!file.downloads.includes(fileApiUrl)) file.downloads.push(fileApiUrl) }
+      else file.downloads = [fileApiUrl]
     }
     return { updates, manifest }
   }
@@ -113,7 +95,6 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
   async applyInstanceUpdate(path: string): Promise<InstanceUpdate | undefined> {
     const update = await this.fetchInstanceUpdate(path)
     if (!update || update.updates.length === 0) return update
-
     await this.instanceInstallService.installInstanceFiles({
       path,
       oldFiles: update.updates.filter(u => u.operation === 'update').map(u => u.file),
