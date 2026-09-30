@@ -21,7 +21,7 @@
         rounded="pill"
         class="pl-24 pr-24 text-xl transition-all btn-launch"
         :aria-label="text"
-        @click="onClick()"
+        @click="onPrimaryClick"
         @mouseenter="onHoverEnter"
         @mouseleave="onHoverLeave"
       >
@@ -117,6 +117,7 @@
 </template>
 <script lang="ts" setup>
 import { kLaunchButton } from '@/composables/launchButton'
+import { kLaunchTask } from '@/composables/launchTask'
 import { injection } from '@/util/inject'
 import HomeLaunchButtonMenuList from './HomeLaunchButtonMenuList.vue'
 import { kInstances } from '@/composables/instances'
@@ -125,6 +126,7 @@ import { kInstance } from '@/composables/instance'
 import { useHasMinecraftLicense } from '@/composables/minecraftLicense'
 import { useGamepad } from '@/composables/gamepad'
 import { isBedrockInstance } from '@xmcl/instance'
+import { TaskState } from '@xmcl/runtime-api'
 
 defineProps<{ compact?: boolean; top?: boolean }>()
 
@@ -132,6 +134,7 @@ const emit = defineEmits(['mouseenter', 'mouseleave'])
 const { isValidating } = injection(kInstances)
 
 const { onClick, color, icon, text, loading, leftIcon, count } = injection(kLaunchButton)
+const { status: launchTaskStatus, cancel: cancelLaunchTask } = injection(kLaunchTask)
 const { isActive: isGamepadActive, buttonX } = useGamepad()
 const { t } = useI18n()
 
@@ -149,9 +152,20 @@ function onHoverEnter() {
 function onHoverLeave() {
   emit('mouseleave')
 }
+function onPrimaryClick() {
+  // The facade intentionally shows Cancel while native Minecraft/Forge/assets
+  // install tasks are running. Its generic onClick guard also treats those
+  // phases as loading, though, so routing the click through onClick makes the
+  // visible Cancel button a no-op. Cancel the related root tasks directly.
+  if (launchTaskStatus.value === TaskState.Running) {
+    cancelLaunchTask()
+    return
+  }
+  onClick()
+}
 function onPlayClick() {
   isSpinning.value = true
-  onClick()
+  onPrimaryClick()
 }
 </script>
 
@@ -203,7 +217,7 @@ function onPlayClick() {
 }
 
 /* Play icon does a single full spin when clicked. */
-.btn-play-inset .nested-icon.spin {
+.nested-icon.spin {
   animation: play-spin 0.45s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
