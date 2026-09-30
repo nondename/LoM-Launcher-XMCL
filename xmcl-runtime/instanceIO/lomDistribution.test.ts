@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizeLoMManifest } from './lomDistribution'
+import { getLoMDownloadUrls, normalizeLoMManifest } from './lomDistribution'
 
 const SOURCE = 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
 
@@ -22,7 +22,7 @@ describe('LoM distribution adapter', () => {
             type: 'ForgeMod',
             artifact: {
               size: 1234,
-              url: 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/mods/%5Bforge%5Dexample.jar',
+              url: 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/mods/%5B1.20.1%5D%20SecurityCraft%20v1.10.2.1.jar',
               MD5: '0123456789abcdef0123456789abcdef',
             },
           }, {
@@ -47,13 +47,13 @@ describe('LoM distribution adapter', () => {
     expect(manifest.version).toBe('0.2.0-dev')
     expect(manifest.files).toEqual(expect.arrayContaining([
       expect.objectContaining({
-        path: 'mods/[forge]example.jar',
+        path: 'mods/%5B1.20.1%5D%20SecurityCraft%20v1.10.2.1.jar',
         hashAlgorithm: 'md5',
         hash: '0123456789abcdef0123456789abcdef',
         size: 1234,
       }),
       expect.objectContaining({
-        path: 'resourcepacks/[1.6] Enhanced.zip',
+        path: 'resourcepacks/%5B1.6%5D%20Enhanced.zip',
         hashAlgorithm: 'md5',
         hash: 'fedcba9876543210fedcba9876543210',
         size: 456,
@@ -65,6 +65,14 @@ describe('LoM distribution adapter', () => {
     ]))
     expect(manifest.files.some((file) => file.path.startsWith('repo/'))).toBe(false)
     expect(manifest.delete).toContain('config/lom-updater-test.txt')
+  })
+
+  it('retries GitHub raw URLs with literal percent escapes without changing the primary URL', () => {
+    const url = 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/mods/%5B1.20.1%5D%20SecurityCraft%20v1.10.2.1.jar'
+    expect(getLoMDownloadUrls(url)).toEqual([
+      url,
+      'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/mods/%255B1.20.1%255D%2520SecurityCraft%2520v1.10.2.1.jar',
+    ])
   })
 
   it('keeps compatibility with the old sha1 updater manifest format', () => {
