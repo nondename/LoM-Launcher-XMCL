@@ -83,6 +83,29 @@ jobs:
             }
             console.log(`SecurityCraft direct download OK bytes=${data.length} md5=${actual}`)
 
+            const antiqueAtlas = manifest.files.find((file) => file.path === 'mods/Antique Atlas-1.20.1-8.0.1-Forge.jar')
+            if (!antiqueAtlas?.url || antiqueAtlas.hashAlgorithm !== 'md5' || !antiqueAtlas.hash) {
+              throw new Error('Fixed Antique Atlas artifact is missing from live distribution')
+            }
+            if (!manifest.delete?.includes('mods/Antique Atlas 1.20.1.jar')) {
+              throw new Error('Old Antique Atlas Recipe Fix is missing from live delete list')
+            }
+            if (manifest.files.some((file) => file.path === 'mods/Antique Atlas 1.20.1.jar')) {
+              throw new Error('Old Antique Atlas Recipe Fix is still present in live files')
+            }
+
+            const antiqueResponse = await fetch(antiqueAtlas.url, { cache: 'no-store' })
+            console.log(`Antique Atlas direct HTTP ${antiqueResponse.status}: ${antiqueAtlas.url}`)
+            if (!antiqueResponse.ok) {
+              throw new Error(`Antique Atlas direct download HTTP ${antiqueResponse.status}: ${antiqueAtlas.url}`)
+            }
+            const antiqueData = new Uint8Array(await antiqueResponse.arrayBuffer())
+            const antiqueMd5 = createHash('md5').update(antiqueData).digest('hex')
+            if (antiqueMd5 !== antiqueAtlas.hash) {
+              throw new Error(`Antique Atlas MD5 mismatch expected=${antiqueAtlas.hash} actual=${antiqueMd5}`)
+            }
+            console.log(`Antique Atlas update OK bytes=${antiqueData.length} md5=${antiqueMd5} deletesRecipeFix=true`)
+
             for (const path of ['config/advancementplaques-common.toml', 'config/antiqueatlas-common.toml']) {
               const file = manifest.files.find((entry) => entry.path === path)
               if (!file?.url || !file.hash || !file.hashAlgorithm) {
