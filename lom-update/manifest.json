@@ -1,9 +1,13 @@
 {
-  "version": "0.1.0-test.1",
+  "version": "0.1.0-test.2",
   "files": [
     {
       "path": "config/lom-updater-test.txt",
       "sha1": "70d6077e32330d9c7c2cf85b1f9476e872370ed5"
+    },
+    {
+      "path": "xmcl.json",
+      "sha1": "4f3d9d41d10b901a6ae5b73f1750051b3d092c9e"
     }
   ],
   "delete": []
