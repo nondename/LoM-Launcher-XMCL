@@ -1,0 +1,65 @@
+name: LoM Native Cancel V2 Test
+
+on:
+  push:
+    branches:
+      - fix/lom-native-install-cancel-v2
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Fix node-gyp Python packages
+        shell: pwsh
+        run: python3 -m pip install --break-system-packages --user packaging setuptools
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Cache Electron binaries
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ github.workspace }}/.cache/electron
+            ${{ github.workspace }}/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run cancellation regression
+        run: pnpm vitest run xmcl-runtime/infra/plugins/task.test.ts
+
+      - name: Build LoM launcher
+        shell: pwsh
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          NODE_OPTIONS: --max-old-space-size=32768
+          NODE_ENV: production
+          RELEASE: false
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_TOKEN }}
+        run: |
+          pnpm run --prefix xmcl-keystone-ui build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm run --prefix xmcl-electron-app build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Upload Windows unpacked build
+        uses: actions/upload-artifact@v6
+        with:
+          name: lom-native-cancel-v2-win-b${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 7
+          path: xmcl-electron-app/build/output/win-unpacked/
