@@ -3,7 +3,8 @@ name: LoM Windows Test Build
 on:
   push:
     branches:
-      - lom-updater
+      - master
+      - 'fix/**'
   workflow_dispatch:
 
 jobs:
@@ -40,6 +41,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test LoM distribution adapter
+        run: pnpm vitest run xmcl-runtime/instanceIO/lomDistribution.test.ts
+
       - name: Build LoM launcher
         shell: pwsh
         env:
@@ -53,6 +57,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm run --prefix xmcl-electron-app build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Validate LoM executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'xmcl-electron-app/build/output/win-unpacked/LoM Launcher.exe')) {
+            throw 'LoM Launcher.exe is missing from Windows build'
+          }
 
       - name: Upload Windows unpacked build
         uses: actions/upload-artifact@v6
