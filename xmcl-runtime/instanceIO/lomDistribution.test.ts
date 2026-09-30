@@ -110,6 +110,23 @@ describe('LoM distribution adapter', () => {
     })
   })
 
+  it('accepts a Git text blob when the manifest checkout only differs by the final newline', () => {
+    const raw = Buffer.from('first=true\nsecond=false', 'utf8')
+    const checkout = Buffer.from('first=true\nsecond=false\n', 'utf8')
+    const hash = createHash('md5').update(checkout).digest('hex')
+
+    expect(validateLoMFileBytes(raw, {
+      path: 'config/antiqueatlas-common.toml',
+      size: checkout.length,
+      hash,
+      hashAlgorithm: 'md5',
+    })).toMatchObject({
+      valid: true,
+      eolCompatible: true,
+      actualSize: raw.length,
+    })
+  })
+
   it('does not apply line-ending compatibility to binary files', () => {
     const lf = Buffer.from([0x50, 0x4b, 0x0a, 0x01])
     const crlf = Buffer.from([0x50, 0x4b, 0x0d, 0x0a, 0x01])
