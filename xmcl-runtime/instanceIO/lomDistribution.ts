@@ -44,12 +44,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
 
-function decodePath(path: string): string {
+function normalizePackPath(path: string): string {
   return path
     .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
     .split('/')
     .filter(Boolean)
-    .map((segment) => decodeURIComponent(segment))
     .join('/')
 }
 
@@ -59,16 +59,22 @@ function relativePathFromArtifactUrl(url: string, sourceUrl: string): string | u
   if (artifactUrl.origin !== sourceBase.origin || !artifactUrl.pathname.startsWith(sourceBase.pathname)) {
     return undefined
   }
-  return decodePath(artifactUrl.pathname.slice(sourceBase.pathname.length))
+  // Do not decode percent escapes here. A number of files in the original LoM
+  // pack are literally named with %20, %5B, %2B, etc. Decoding them would
+  // silently change the pack layout on disk.
+  return normalizePackPath(artifactUrl.pathname.slice(sourceBase.pathname.length))
 }
 
 function normalizeArtifactPath(artifact: DistributionArtifact, sourceUrl: string): string | undefined {
-  if (typeof artifact.url === 'string') {
-    const fromUrl = relativePathFromArtifactUrl(artifact.url, sourceUrl)
-    if (fromUrl) return fromUrl
-  }
+  // Helios File entries carry the intended on-disk path. Prefer it over the
+  // URL because the repository contains both normal filenames with spaces and
+  // filenames whose percent escapes are literal characters.
   if (typeof artifact.path === 'string') {
-    return decodePath(artifact.path)
+    const path = normalizePackPath(artifact.path)
+    if (path) return path
+  }
+  if (typeof artifact.url === 'string') {
+    return relativePathFromArtifactUrl(artifact.url, sourceUrl)
   }
   return undefined
 }
@@ -128,7 +134,7 @@ function normalizeLegacyManifest(raw: Record<string, unknown>): LoMManifest | un
       throw new Error('[LoM Updater] Invalid legacy manifest file entry')
     }
     files.push({
-      path: decodePath(path),
+      path: normalizePackPath(path),
       url: typeof value.url === 'string' ? value.url : undefined,
       size: typeof value.size === 'number' ? value.size : undefined,
       hash: sha1.toLowerCase(),
@@ -141,6 +147,31 @@ function normalizeLegacyManifest(raw: Record<string, unknown>): LoMManifest | un
     files,
     delete: Array.isArray(raw.delete) ? raw.delete.filter((v): v is string => typeof v === 'string') : undefined,
   }
+}
+
+/**
+ * GitHub raw URLs are ambiguous for this pack because some repository files
+ * literally contain percent escapes in their filename. For example, the repo
+ * contains "%5B1.20.1%5D%20SecurityCraft...jar", while distribution.json
+ * points at a raw URL containing the same text. A normal HTTP request decodes
+ * those escapes to "[1.20.1] SecurityCraft...jar" and returns 404.
+ *
+ * Always try the manifest URL first. Only if that returns 404 should the
+ * updater try the second candidate where percent signs themselves are encoded
+ * (% -> %25). This keeps ordinary URLs such as "Antique%20Atlas.jar" working.
+ */
+export function getLoMDownloadUrls(url: string): string[] {
+  const parsed = new URL(url)
+  const primary = parsed.toString()
+  const result = [primary]
+
+  if (parsed.hostname === 'raw.githubusercontent.com' && /%[0-9a-f]{2}/i.test(parsed.pathname)) {
+    const literalPercentPath = parsed.pathname.replace(/%/g, '%25')
+    const fallback = `${parsed.origin}${literalPercentPath}${parsed.search}${parsed.hash}`
+    if (fallback !== primary) result.push(fallback)
+  }
+
+  return result
 }
 
 export function normalizeLoMManifest(raw: unknown, sourceUrl: string): LoMManifest {
