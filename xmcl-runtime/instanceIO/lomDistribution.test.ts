@@ -6,9 +6,10 @@ import { validateLoMFileBytes } from './lomFileIntegrity'
 const SOURCE = 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
 
 describe('LoM distribution adapter', () => {
-  it('extracts pack files recursively and ignores Forge repository libraries', () => {
+  it('extracts pack files recursively, uses pack revision, and forwards deletions', () => {
     const manifest = normalizeLoMManifest({
       version: '1.0.0',
+      delete: ['mods/Antique Atlas 1.20.1.jar'],
       servers: [{
         id: 'Legends_of_Medieval-1.20.1',
         name: 'Legends of Medieval',
@@ -46,7 +47,7 @@ describe('LoM distribution adapter', () => {
       }],
     }, SOURCE)
 
-    expect(manifest.version).toBe('0.2.0-dev')
+    expect(manifest.version).toBe('1.0.0')
     expect(manifest.files).toEqual(expect.arrayContaining([
       expect.objectContaining({
         path: 'mods/[forge]example.jar',
@@ -66,7 +67,10 @@ describe('LoM distribution adapter', () => {
       }),
     ]))
     expect(manifest.files.some((file) => file.path.startsWith('repo/'))).toBe(false)
-    expect(manifest.delete).toContain('config/lom-updater-test.txt')
+    expect(manifest.delete).toEqual(expect.arrayContaining([
+      'config/lom-updater-test.txt',
+      'mods/Antique Atlas 1.20.1.jar',
+    ]))
   })
 
   it('keeps compatibility with the old sha1 updater manifest format', () => {
