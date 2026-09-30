@@ -50,6 +50,7 @@ jobs:
           @'
           import { createHash } from 'node:crypto'
           import { normalizeLoMManifest } from './xmcl-runtime/instanceIO/lomDistribution.ts'
+          import { validateLoMFileBytes } from './xmcl-runtime/instanceIO/lomFileIntegrity.ts'
 
           async function main() {
             const source = 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
@@ -81,6 +82,19 @@ jobs:
               throw new Error(`SecurityCraft MD5 mismatch expected=${securityCraft.hash} actual=${actual}`)
             }
             console.log(`SecurityCraft direct download OK bytes=${data.length} md5=${actual}`)
+
+            const advancement = manifest.files.find((file) => file.path === 'config/advancementplaques-common.toml')
+            if (!advancement?.url || !advancement.hash || !advancement.hashAlgorithm) {
+              throw new Error('advancementplaques-common.toml missing from live distribution')
+            }
+            const textResponse = await fetch(advancement.url, { cache: 'no-store' })
+            if (!textResponse.ok) throw new Error(`advancementplaques HTTP ${textResponse.status}`)
+            const textData = Buffer.from(await textResponse.arrayBuffer())
+            const textValidation = validateLoMFileBytes(textData, advancement)
+            console.log(`advancementplaques direct download bytes=${textData.length} manifestBytes=${advancement.size} eolCompatible=${textValidation.eolCompatible}`)
+            if (!textValidation.valid) {
+              throw new Error(`advancementplaques live bytes do not satisfy manifest compatibility: ${JSON.stringify(textValidation)}`)
+            }
           }
 
           void main().catch((error) => {
