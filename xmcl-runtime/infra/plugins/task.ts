@@ -129,6 +129,12 @@ export const pluginTasks: LauncherAppPlugin = (app) => {
         checkTaskCompleted()
       })
       const onComplete = () => {
+        // Cancellation is terminal. Some lower-level operations may settle
+        // successfully after their AbortSignal fires; do not let that late
+        // resolution resurrect a cancelled install as Succeed.
+        if (obj.state === TaskState.Cancelled) {
+          return
+        }
         obj.state = TaskState.Succeed
         endTaskSpan('success')
         checkTaskCompleted()

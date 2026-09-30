@@ -188,7 +188,7 @@ export class LaunchService extends AbstractService implements ILaunchService {
 
   async #generateOptions(options: LaunchOptions, version: ResolvedVersion, accessToken?: string) {
     const user = options.user
-    const demo = !user.id && !user.selectedProfile && !user.username
+    const demo = false
     const gameProfile = user.profiles[user.selectedProfile] ?? offline('Steve').selectedProfile
     const javaPath = options.java
     const yggdrasilAgent = options.yggdrasilAgent

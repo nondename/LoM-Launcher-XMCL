@@ -120,7 +120,7 @@ export const pluginSetup: LauncherAppPlugin = async (app) => {
     }
     const drives = await getAllDrived()
     return {
-      locale: app.host.getLocale(),
+      locale: 'ru',
       minecraftPath: app.minecraftDataPath,
       defaultPath,
       drives,

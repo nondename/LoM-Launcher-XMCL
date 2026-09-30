@@ -1,0 +1,123 @@
+name: LoM Release
+
+on:
+  push:
+    branches:
+      - lom-updater
+    paths:
+      - 'lom/release.json'
+
+permissions:
+  contents: write
+
+jobs:
+  release-windows:
+    runs-on: windows-latest
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Fix node-gyp Python packages
+        shell: pwsh
+        run: python3 -m pip install --break-system-packages --user packaging setuptools
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Cache Electron binaries
+        uses: actions/cache@v5
+        with:
+          path: |
+            ${{ github.workspace }}/.cache/electron
+            ${{ github.workspace }}/.cache/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('pnpm-lock.yaml') }}
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate release version
+        id: release
+        shell: pwsh
+        run: |
+          $release = Get-Content 'lom/release.json' -Raw | ConvertFrom-Json
+          $app = Get-Content 'xmcl-electron-app/package.json' -Raw | ConvertFrom-Json
+          $root = Get-Content 'package.json' -Raw | ConvertFrom-Json
+          if ($release.version -ne $app.version) { throw "release.json version $($release.version) != app version $($app.version)" }
+          if ($release.version -ne $root.version) { throw "release.json version $($release.version) != root version $($root.version)" }
+          "version=$($release.version)" >> $env:GITHUB_OUTPUT
+          "tag=v$($release.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Run cancellation regression
+        run: pnpm vitest run xmcl-runtime/infra/plugins/task.test.ts
+
+      - name: Build LoM Launcher
+        shell: pwsh
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          NODE_OPTIONS: --max-old-space-size=32768
+          NODE_ENV: production
+          RELEASE: false
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_TOKEN }}
+        run: |
+          pnpm run --prefix xmcl-keystone-ui build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm run --prefix xmcl-electron-app build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Validate LoM Windows build
+        shell: pwsh
+        run: |
+          $dir = 'xmcl-electron-app/build/output/win-unpacked'
+          if (!(Test-Path "$dir/LoM Launcher.exe")) { throw 'LoM Launcher.exe is missing from the Windows build' }
+          if (Test-Path "$dir/XMCL.exe") { throw 'Unexpected XMCL.exe found in the LoM release build' }
+          if (!(Test-Path "$dir/resources/app.asar")) { throw 'resources/app.asar is missing from the Windows build' }
+
+      - name: Package Windows x64 portable build
+        id: package
+        shell: pwsh
+        run: |
+          $version = '${{ steps.release.outputs.version }}'
+          $zip = "LoM-Launcher-v$version-windows-x64.zip"
+          $sha = "$zip.sha256"
+          Compress-Archive -Path 'xmcl-electron-app/build/output/win-unpacked/*' -DestinationPath $zip -CompressionLevel Optimal
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $zip" | Set-Content -NoNewline $sha
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+
+      - name: Upload release build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: LoM-Launcher-v${{ steps.release.outputs.version }}-windows-x64
+          path: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.sha }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = '${{ steps.release.outputs.tag }}'
+          if (gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null) {
+            throw "GitHub release $tag already exists"
+          }
+          gh release create $tag `
+            '${{ steps.package.outputs.zip }}' `
+            '${{ steps.package.outputs.sha }}' `
+            --repo $env:GITHUB_REPOSITORY `
+            --target $env:GITHUB_SHA `
+            --title 'LoM Launcher v0.1' `
+            --notes-file 'lom/RELEASE_NOTES.md' `
+            --latest

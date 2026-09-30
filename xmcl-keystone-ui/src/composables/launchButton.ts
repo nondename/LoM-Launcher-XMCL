@@ -1,6 +1,7 @@
 import { injection } from '@/util/inject'
 import { isBedrockInstance } from '@xmcl/instance'
 import { InjectionKey } from 'vue'
+import { useLocalStorage } from '@vueuse/core'
 import { useDialog } from './dialog'
 import { kInstance } from './instance'
 import { kInstanceFiles } from './instanceFiles'
@@ -16,6 +17,8 @@ import { kLaunchTask } from './launchTask'
 import { TaskState, BedrockServiceKey } from '@xmcl/runtime-api'
 import { useService } from './service'
 import { useTask } from './task'
+import { useLomUpdate } from './lomUpdate'
+import { LOM_COLD_START_PENDING_KEY, isLoMProfile } from './lomProfile'
 import { withRendererAction, type RendererActionScope } from '@/rendererAction'
 
 export interface LaunchMenuItem {
@@ -37,6 +40,15 @@ export function useLaunchButton() {
   const { path } = injection(kInstance)
   const { instance } = injection(kInstance)
   const isBedrock = computed(() => isBedrockInstance(instance.value))
+  const coldStartPendingPath = useLocalStorage(LOM_COLD_START_PENDING_KEY, '' as string)
+  const {
+    status: lomUpdateStatus,
+    progress: lomUpdateProgress,
+    buttonText: lomUpdateButtonText,
+    buttonLoading: lomUpdateButtonLoading,
+    actionable: lomUpdateActionable,
+    run: runLomUpdate,
+  } = useLomUpdate()
 
   const {
     getInstallation,
@@ -176,6 +188,7 @@ export function useLaunchButton() {
     right?: boolean
     menu?: LaunchMenuItem[]
     actionName?: string
+    skipPreclick?: boolean
     onClick: (instancePath: string, action?: RendererActionScope) => void | Promise<void>
   }>({
     text: t('launch.launch'),
@@ -209,6 +222,8 @@ export function useLaunchButton() {
       isInstalling,
       installPercentage,
       bedrockGameRunning,
+      lomUpdateButtonText,
+      lomUpdateActionable,
       // Rebuild the facade when the diagnosis items themselves change (e.g. the
       // unresolved-file count drops from 3 to 1). The `issues` bitmask stays
       // the same in that case, so without this the cached `menu` text is stale.
@@ -285,8 +300,8 @@ export function useLaunchButton() {
       }
       if (hasTaskRunning) {
         launchButtonFacade.value = {
-          icon: 'pause',
-          text: t('task.pause'),
+          icon: 'close',
+          text: t('launch.cancel'),
           color: 'blue',
           onClick: () => cancel(),
         }
@@ -345,6 +360,17 @@ export function useLaunchButton() {
             ])
           },
         }
+      } else if (lomUpdateButtonText.value) {
+        const failed = lomUpdateProgress.value.phase === 'error'
+        launchButtonFacade.value = {
+          text: lomUpdateButtonText.value,
+          color: failed ? 'orange' : 'primary',
+          leftIcon: lomUpdateActionable.value ? 'system_update_alt' : undefined,
+          skipPreclick: true,
+          onClick: lomUpdateActionable.value
+            ? async (instancePath) => { await runLomUpdate(instancePath) }
+            : () => {},
+        }
       } else {
         launchButtonFacade.value = {
           text: t('launch.launch'),
@@ -384,7 +410,86 @@ export function useLaunchButton() {
       isRefreshingVersion.value ||
       loadingInstanceFiles.value ||
       fixingInstance.value ||
-      checkingBedrock.value,
+      checkingBedrock.value ||
+      lomUpdateButtonLoading.value,
+  )
+
+  // Drive the native XMCL repair/install stage and then the LoM manifest stage
+  // only for the exact profile created by the empty-state cold start. Each
+  // diagnosis signature is attempted automatically once; on a persistent
+  // failure the normal Install/Retry button remains available instead of
+  // creating an unattended retry loop.
+  let coldStartRunning = false
+  let lastColdStartAttempt = ''
+  async function driveLoMColdStart() {
+    if (coldStartRunning) return
+    const instancePath = path.value
+    if (!instancePath || coldStartPendingPath.value !== instancePath) return
+    if (!isLoMProfile(instance.value) || isBedrock.value) return
+    if (transition.value || loading.value || hasTaskRunning.value || hasGameRunning.value) return
+
+    if (issues.value) {
+      const attempt = `repair:${instancePath}:${issues.value}`
+      if (lastColdStartAttempt === attempt) return
+      lastColdStartAttempt = attempt
+      coldStartRunning = true
+      try {
+        await Promise.allSettled([
+          fixVersionIssues(instancePath),
+          fixInstanceFileIssue(instancePath),
+        ])
+      } finally {
+        coldStartRunning = false
+        queueMicrotask(() => { void driveLoMColdStart() })
+      }
+      return
+    }
+
+    if (lomUpdateProgress.value.phase === 'error') return
+
+    if (lomUpdateActionable.value) {
+      const attempt = `update:${instancePath}:${lomUpdateStatus.value?.remoteVersion ?? 'unknown'}`
+      if (lastColdStartAttempt === attempt) return
+      lastColdStartAttempt = attempt
+      coldStartRunning = true
+      try {
+        await runLomUpdate(instancePath)
+        if (
+          coldStartPendingPath.value === instancePath &&
+          (lomUpdateProgress.value.phase === 'done' || lomUpdateStatus.value?.available === false)
+        ) {
+          coldStartPendingPath.value = ''
+          lastColdStartAttempt = ''
+        }
+      } finally {
+        coldStartRunning = false
+        queueMicrotask(() => { void driveLoMColdStart() })
+      }
+      return
+    }
+
+    if (lomUpdateProgress.value.phase === 'done' || lomUpdateStatus.value?.available === false) {
+      coldStartPendingPath.value = ''
+      lastColdStartAttempt = ''
+    }
+  }
+
+  watch(
+    [
+      path,
+      instance,
+      coldStartPendingPath,
+      transition,
+      loading,
+      hasTaskRunning,
+      hasGameRunning,
+      issues,
+      lomUpdateActionable,
+      lomUpdateStatus,
+      () => lomUpdateProgress.value.phase,
+    ],
+    () => { void driveLoMColdStart() },
+    { immediate: true },
   )
 
   const leftIcon = computed(() => launchButtonFacade.value.leftIcon)
@@ -415,15 +520,17 @@ export function useLaunchButton() {
     if ((loading.value || transition.value) && !launching.value) return
     const instancePath = path.value
     if (!instancePath) return
-    for (const listener of listeners) {
-      try {
-        await listener()
-      } catch {
-        return
+    const facade = launchButtonFacade.value
+    if (!facade.skipPreclick) {
+      for (const listener of listeners) {
+        try {
+          await listener()
+        } catch {
+          return
+        }
       }
     }
     if (path.value !== instancePath) return
-    const facade = launchButtonFacade.value
     if (facade.actionName) {
       await withRendererAction(
         facade.actionName,

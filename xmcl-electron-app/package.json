@@ -2,9 +2,9 @@
     "name": "xmcl",
     "private": true,
     "main": "./index.js",
-    "version": "0.70.0",
+    "version": "0.1.0",
     "author": "ci010 <cijhn@hotmail.com>",
-    "description": "XMCL - An open-source launcher for Minecraft",
+    "description": "LoM Launcher - Legends of Medieval launcher",
     "license": "MIT",
     "engines": {
         "node": ">=22.16.0"

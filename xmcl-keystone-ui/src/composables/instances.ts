@@ -6,6 +6,7 @@ import { useService } from './service'
 import { useState } from './syncableState'
 import { InstanceOrGroupData } from './instanceGroup'
 import { kUserContext } from './user'
+import { LOM_COLD_START_PENDING_KEY, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
 
 export const kInstances: InjectionKey<ReturnType<typeof useInstances>> = Symbol('Instances')
 
@@ -13,7 +14,7 @@ export const kInstances: InjectionKey<ReturnType<typeof useInstances>> = Symbol(
  * Hook of a view of all instances & some deletion/selection functions
  */
 export function useInstances() {
-  const { getSharedInstancesState, editInstance, deleteInstance, validateInstancePath } = useService(InstanceServiceKey)
+  const { getSharedInstancesState, createInstance, editInstance, deleteInstance, validateInstancePath } = useService(InstanceServiceKey)
   const { state, isValidating, error } = useState(getSharedInstancesState, class extends InstanceState {
     constructor() {
       super()
@@ -90,6 +91,7 @@ export function useInstances() {
   const allInstances = computed(() => state.value?.instances ?? [])
 
   const _path = useLocalStorage('selectedInstancePath', '' as string)
+  const coldStartPendingPath = useLocalStorage(LOM_COLD_START_PENDING_KEY, '' as string)
   const path = ref('')
   // Guard against `watch(instances)` clobbering the restored selection before
   // the async `watch(state)` initializer has finished. Without this, the
@@ -102,6 +104,7 @@ export function useInstances() {
 
   migrationBus.once((e) => {
     _path.value = _path.value.replace(e.oldRoot, e.newRoot)
+    coldStartPendingPath.value = coldStartPendingPath.value.replace(e.oldRoot, e.newRoot)
   })
 
   async function edit(options: EditInstanceOptions & { instancePath: string }) {
@@ -120,42 +123,64 @@ export function useInstances() {
     const index = instances.value.findIndex(i => i.path === instancePath)
     const lastSelected = path.value
     await deleteInstance(instancePath, deleteData)
+    if (coldStartPendingPath.value === instancePath) coldStartPendingPath.value = ''
     if (instancePath === lastSelected) {
       path.value = instances.value[Math.max(index - 1, 0)]?.path ?? ''
     }
     return allInstances.value.length === 0
   }
+
   watch(state, async (newVal, oldVal) => {
-    if (!newVal) return
-    if (!oldVal) {
-      // initialize
-      const lastSelectedPath = _path.value
+    if (!newVal || oldVal) return
 
-      const selectDefault = async () => {
-        // Select the first instance
-        const defaultPath = instances.value[0]?.path ?? ''
-        _path.value = defaultPath
-      }
+    const selectDefault = () => {
+      _path.value = instances.value[0]?.path ?? ''
+    }
 
-      if (lastSelectedPath) {
-        // Validate the last selected path
-        if (!instances.value.some(i => i.path === lastSelectedPath)) {
-          await selectDefault()
-        } else {
-          const badInstance = await validateInstancePath(lastSelectedPath)
-          if (badInstance) {
-            await selectDefault()
-          }
-        }
+    try {
+      // A brand-new LoM Launcher creates and selects the canonical profile, but
+      // does not start downloading anything until the user explicitly clicks
+      // Install/Update. Authlib injector is disabled before the first launch.
+      if (newVal.instances.length === 0) {
+        const createdPath = await createInstance({
+          name: LOM_PROFILE_NAME,
+          runtime: { ...LOM_PROFILE_RUNTIME },
+        })
+        await editInstance({
+          instancePath: createdPath,
+          disableAuthlibInjector: true,
+        })
+        // Clear the legacy cold-start auto-install marker. The launch button may
+        // still observe this key for older profiles, but new LoM profiles must
+        // wait for an explicit user action before installing files.
+        coldStartPendingPath.value = ''
+        _path.value = createdPath
       } else {
-        // No selected, try to select the first instance
-        await selectDefault()
+        const lastSelectedPath = _path.value
+        if (lastSelectedPath) {
+          if (!instances.value.some(i => i.path === lastSelectedPath)) {
+            selectDefault()
+          } else {
+            const badInstance = await validateInstancePath(lastSelectedPath)
+            if (badInstance) selectDefault()
+          }
+        } else {
+          selectDefault()
+        }
       }
 
       path.value = _path.value
+    } catch (e) {
+      console.error('[LoM cold start] Failed to provision default instance', e)
+      // Keep the generic XMCL fallback usable if provisioning fails. This also
+      // prevents the renderer from being stuck forever in its initializing state.
+      selectDefault()
+      path.value = _path.value
+    } finally {
       initialized.value = true
     }
   })
+
   watch(path, (newPath) => {
     if (newPath !== _path.value) {
       // save to local storage
@@ -178,7 +203,10 @@ export function useInstances() {
     }
   })
 
-  const ready = computed(() => state.value !== undefined)
+  // `ready` means the initial profile selection/provisioning is complete, not
+  // merely that the shared service state has arrived. Context.ts relies on
+  // this to decide whether an empty launcher should redirect to /me.
+  const ready = computed(() => state.value !== undefined && initialized.value)
   const groups = computed(() => {
     const rawGroups = state.value?.groups ?? []
     const isOffline = userProfile?.value?.authority && userProfile?.value?.authority !== AUTHORITY_MICROSOFT

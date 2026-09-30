@@ -34,7 +34,7 @@ export const pluginSettings: LauncherAppPlugin = async (app) => {
   })
 
   const normalizeLocale = (locale: string) => {
-    locale = locale || app.host.getLocale()
+    locale = locale || 'ru'
     if (locale.startsWith('en')) {
       locale = 'en'
     }
