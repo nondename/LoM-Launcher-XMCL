@@ -31,7 +31,7 @@ export interface LoMUpdateStatus {
 }
 
 export interface LoMUpdateProgress {
-  phase: 'idle' | 'checking' | 'downloading' | 'installing' | 'done' | 'error'
+  phase: 'idle' | 'checking' | 'downloading' | 'cancelling' | 'installing' | 'done' | 'error'
   filesDone: number
   filesTotal: number
   bytesDone: number
@@ -50,6 +50,8 @@ export interface XUpdateService {
   checkLoMUpdate(path: string): Promise<LoMUpdateStatus>
   /** Apply the dedicated LoM manifest update. */
   applyLoMUpdate(path: string): Promise<LoMUpdateResult>
+  /** Cancel a LoM update while it is still downloading. */
+  cancelLoMUpdate(path: string): Promise<boolean>
   /** Read current LoM updater progress. */
   getLoMUpdateProgress(): Promise<LoMUpdateProgress>
   uploadInstanceManifest(options: SetInstanceManifestOptions): Promise<void>
