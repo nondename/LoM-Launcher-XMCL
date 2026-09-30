@@ -83,17 +83,19 @@ jobs:
             }
             console.log(`SecurityCraft direct download OK bytes=${data.length} md5=${actual}`)
 
-            const advancement = manifest.files.find((file) => file.path === 'config/advancementplaques-common.toml')
-            if (!advancement?.url || !advancement.hash || !advancement.hashAlgorithm) {
-              throw new Error('advancementplaques-common.toml missing from live distribution')
-            }
-            const textResponse = await fetch(advancement.url, { cache: 'no-store' })
-            if (!textResponse.ok) throw new Error(`advancementplaques HTTP ${textResponse.status}`)
-            const textData = Buffer.from(await textResponse.arrayBuffer())
-            const textValidation = validateLoMFileBytes(textData, advancement)
-            console.log(`advancementplaques direct download bytes=${textData.length} manifestBytes=${advancement.size} eolCompatible=${textValidation.eolCompatible}`)
-            if (!textValidation.valid) {
-              throw new Error(`advancementplaques live bytes do not satisfy manifest compatibility: ${JSON.stringify(textValidation)}`)
+            for (const path of ['config/advancementplaques-common.toml', 'config/antiqueatlas-common.toml']) {
+              const file = manifest.files.find((entry) => entry.path === path)
+              if (!file?.url || !file.hash || !file.hashAlgorithm) {
+                throw new Error(`${path} missing from live distribution`)
+              }
+              const textResponse = await fetch(file.url, { cache: 'no-store' })
+              if (!textResponse.ok) throw new Error(`${path} HTTP ${textResponse.status}`)
+              const textData = Buffer.from(await textResponse.arrayBuffer())
+              const textValidation = validateLoMFileBytes(textData, file)
+              console.log(`${path} direct download bytes=${textData.length} manifestBytes=${file.size} textCompatible=${textValidation.eolCompatible}`)
+              if (!textValidation.valid) {
+                throw new Error(`${path} live bytes do not satisfy manifest compatibility: ${JSON.stringify(textValidation)}`)
+              }
             }
           }
 
