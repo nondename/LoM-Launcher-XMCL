@@ -1,5 +1,7 @@
+import { createHash } from 'crypto'
 import { describe, expect, it } from 'vitest'
 import { normalizeLoMManifest } from './lomDistribution'
+import { validateLoMFileBytes } from './lomFileIntegrity'
 
 const SOURCE = 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
 
@@ -89,5 +91,35 @@ describe('LoM distribution adapter', () => {
       }],
       delete: undefined,
     })
+  })
+
+  it('accepts an LF Git text blob when the manifest describes equivalent CRLF bytes', () => {
+    const lf = Buffer.from('first=true\nsecond=false\nthird=true\n', 'utf8')
+    const crlf = Buffer.from('first=true\r\nsecond=false\r\nthird=true\r\n', 'utf8')
+    const hash = createHash('md5').update(crlf).digest('hex')
+
+    expect(validateLoMFileBytes(lf, {
+      path: 'config/example-common.toml',
+      size: crlf.length,
+      hash,
+      hashAlgorithm: 'md5',
+    })).toMatchObject({
+      valid: true,
+      eolCompatible: true,
+      actualSize: lf.length,
+    })
+  })
+
+  it('does not apply line-ending compatibility to binary files', () => {
+    const lf = Buffer.from([0x50, 0x4b, 0x0a, 0x01])
+    const crlf = Buffer.from([0x50, 0x4b, 0x0d, 0x0a, 0x01])
+    const hash = createHash('md5').update(crlf).digest('hex')
+
+    expect(validateLoMFileBytes(lf, {
+      path: 'mods/example.jar',
+      size: crlf.length,
+      hash,
+      hashAlgorithm: 'md5',
+    }).valid).toBe(false)
   })
 })
