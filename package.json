@@ -20,7 +20,7 @@
         "dev:main": "pnpm run --prefix=xmcl-electron-app dev",
         "dev:deskgap": "pnpm run --prefix=deskgap-app dev",
         "dev:renderer": "pnpm run --prefix=xmcl-keystone-ui dev",
-        "lint": "oxlint -c ./.oxlintrc.json packages && pnpm run --prefix=xmcl-keystone-ui lint && pnpm run --prefix=xmcl-runtime lint && pnpm run --prefix=xmcl-electron-app lint && pnpm run --prefix=xmcl-keystone-ui lint",
+        "lint": "oxlint -c ./.oxlintrc.json packages && pnpm run --prefix=xmcl-keystone-ui lint && pnpm run --prefix=xmcl-runtime lint && pnpm run --prefix=xmcl-runtime-api lint && pnpm run --prefix=xmcl-electron-app lint",
         "i18n": "pnpm run --prefix=xmcl-keystone-ui i18n",
         "lint:i18n": "pnpm run --prefix=xmcl-keystone-ui lint:i18n",
         "i18n:remove": "pnpm run --prefix=xmcl-keystone-ui i18n:remove",
