@@ -44,11 +44,12 @@ jobs:
       - name: Test LoM distribution adapter
         run: pnpm vitest run xmcl-runtime/instanceIO/lomDistribution.test.ts
 
-      - name: Validate live LoM pack distribution
+      - name: Validate live LoM pack distribution and download
         shell: pwsh
         run: |
           @'
-          import { normalizeLoMManifest } from './xmcl-runtime/instanceIO/lomDistribution.ts'
+          import { createHash } from 'node:crypto'
+          import { getLoMDownloadUrls, normalizeLoMManifest } from './xmcl-runtime/instanceIO/lomDistribution.ts'
 
           async function main() {
             const source = 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
@@ -60,6 +61,33 @@ jobs:
             console.log(`LoM distribution version=${manifest.version} files=${manifest.files.length} activeMods=${activeJars.length} disabledMods=${disabledJars.length}`)
             if (activeJars.length < 100) throw new Error(`Suspiciously small LoM mod set: ${activeJars.length}`)
             if (!manifest.files.some((file) => file.path === 'options.txt')) throw new Error('options.txt missing from normalized manifest')
+
+            const securityCraft = manifest.files.find((file) => file.path.includes('SecurityCraft'))
+            if (!securityCraft?.url || securityCraft.hashAlgorithm !== 'md5' || !securityCraft.hash) {
+              throw new Error('SecurityCraft artifact is missing from live distribution')
+            }
+
+            const candidates = getLoMDownloadUrls(securityCraft.url)
+            let data: Uint8Array | undefined
+            let usedUrl = ''
+            for (const candidate of candidates) {
+              const artifactResponse = await fetch(candidate, { cache: 'no-store' })
+              console.log(`SecurityCraft candidate HTTP ${artifactResponse.status}: ${candidate}`)
+              if (artifactResponse.ok) {
+                data = new Uint8Array(await artifactResponse.arrayBuffer())
+                usedUrl = candidate
+                break
+              }
+              if (artifactResponse.status !== 404) {
+                throw new Error(`Unexpected HTTP ${artifactResponse.status}: ${candidate}`)
+              }
+            }
+            if (!data) throw new Error('SecurityCraft could not be downloaded from any candidate URL')
+            const actual = createHash('md5').update(data).digest('hex')
+            if (actual !== securityCraft.hash) {
+              throw new Error(`SecurityCraft MD5 mismatch expected=${securityCraft.hash} actual=${actual}`)
+            }
+            console.log(`SecurityCraft live download OK bytes=${data.length} md5=${actual} url=${usedUrl}`)
           }
 
           void main().catch((error) => {
