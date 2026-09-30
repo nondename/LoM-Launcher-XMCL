@@ -300,8 +300,8 @@ export function useLaunchButton() {
       }
       if (hasTaskRunning) {
         launchButtonFacade.value = {
-          icon: 'pause',
-          text: t('task.pause'),
+          icon: 'close',
+          text: t('launch.cancel'),
           color: 'blue',
           onClick: () => cancel(),
         }
