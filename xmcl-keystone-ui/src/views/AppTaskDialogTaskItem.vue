@@ -84,7 +84,22 @@ const { isDark } = injection(kTheme)
 const localizeTask = useLocalizedTaskFunc()
 
 const hovered = ref(false)
-const localized = computed(() => localizeTask(props.item))
+const localized = computed(() => {
+  if (props.item.type === 'installInstance' && props.item.taskId === 'lom-update') {
+    const substate = props.item.substate as any
+    let subtitle = 'Проверка файлов сборки'
+    if (substate?.type === 'install-instance.download') {
+      subtitle = String(substate.count ?? 'Загрузка файлов сборки')
+    } else if (substate?.type === 'install-instance.link') {
+      subtitle = `Установка файлов сборки: ${substate.count ?? 0}`
+    }
+    return {
+      title: 'Legends of Medieval — обновление сборки',
+      subtitle,
+    }
+  }
+  return localizeTask(props.item)
+})
 
 const color = computed(() => {
   switch (props.item.state) {

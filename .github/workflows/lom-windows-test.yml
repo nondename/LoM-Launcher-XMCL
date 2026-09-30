@@ -3,7 +3,8 @@ name: LoM Windows Test Build
 on:
   push:
     branches:
-      - lom-updater
+      - master
+      - 'fix/**'
   workflow_dispatch:
 
 jobs:
@@ -40,6 +41,73 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test LoM distribution adapter
+        run: pnpm vitest run xmcl-runtime/instanceIO/lomDistribution.test.ts
+
+      - name: Validate live LoM pack distribution and direct download
+        shell: pwsh
+        run: |
+          @'
+          import { createHash } from 'node:crypto'
+          import { normalizeLoMManifest } from './xmcl-runtime/instanceIO/lomDistribution.ts'
+          import { validateLoMFileBytes } from './xmcl-runtime/instanceIO/lomFileIntegrity.ts'
+
+          async function main() {
+            const source = 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
+            const response = await fetch(source, { cache: 'no-store' })
+            if (!response.ok) throw new Error(`distribution HTTP ${response.status}`)
+            const manifest = normalizeLoMManifest(await response.json(), source)
+            const activeJars = manifest.files.filter((file) => file.path.startsWith('mods/') && file.path.endsWith('.jar'))
+            const disabledJars = manifest.files.filter((file) => file.path.startsWith('mods/') && file.path.endsWith('.jar.deactivation'))
+            console.log(`LoM distribution version=${manifest.version} files=${manifest.files.length} activeMods=${activeJars.length} disabledMods=${disabledJars.length}`)
+            if (activeJars.length < 100) throw new Error(`Suspiciously small LoM mod set: ${activeJars.length}`)
+            if (!manifest.files.some((file) => file.path === 'options.txt')) throw new Error('options.txt missing from normalized manifest')
+
+            const securityCraft = manifest.files.find((file) => file.path.includes('SecurityCraft'))
+            if (!securityCraft?.url || securityCraft.hashAlgorithm !== 'md5' || !securityCraft.hash) {
+              throw new Error('SecurityCraft artifact is missing from live distribution')
+            }
+            if (securityCraft.path.includes('%')) {
+              throw new Error(`SecurityCraft local path is still URL-encoded: ${securityCraft.path}`)
+            }
+
+            const artifactResponse = await fetch(securityCraft.url, { cache: 'no-store' })
+            console.log(`SecurityCraft direct HTTP ${artifactResponse.status}: ${securityCraft.url}`)
+            if (!artifactResponse.ok) {
+              throw new Error(`SecurityCraft direct download HTTP ${artifactResponse.status}: ${securityCraft.url}`)
+            }
+            const data = new Uint8Array(await artifactResponse.arrayBuffer())
+            const actual = createHash('md5').update(data).digest('hex')
+            if (actual !== securityCraft.hash) {
+              throw new Error(`SecurityCraft MD5 mismatch expected=${securityCraft.hash} actual=${actual}`)
+            }
+            console.log(`SecurityCraft direct download OK bytes=${data.length} md5=${actual}`)
+
+            for (const path of ['config/advancementplaques-common.toml', 'config/antiqueatlas-common.toml']) {
+              const file = manifest.files.find((entry) => entry.path === path)
+              if (!file?.url || !file.hash || !file.hashAlgorithm) {
+                throw new Error(`${path} missing from live distribution`)
+              }
+              const textResponse = await fetch(file.url, { cache: 'no-store' })
+              if (!textResponse.ok) throw new Error(`${path} HTTP ${textResponse.status}`)
+              const textData = Buffer.from(await textResponse.arrayBuffer())
+              const textValidation = validateLoMFileBytes(textData, file)
+              console.log(`${path} direct download bytes=${textData.length} manifestBytes=${file.size} textCompatible=${textValidation.eolCompatible}`)
+              if (!textValidation.valid) {
+                throw new Error(`${path} live bytes do not satisfy manifest compatibility: ${JSON.stringify(textValidation)}`)
+              }
+            }
+          }
+
+          void main().catch((error) => {
+            console.error(error)
+            process.exitCode = 1
+          })
+          '@ | Set-Content -Encoding utf8 .lom-validate-distribution.ts
+          pnpm tsx .lom-validate-distribution.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item .lom-validate-distribution.ts -Force
+
       - name: Build LoM launcher
         shell: pwsh
         env:
@@ -53,6 +121,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm run --prefix xmcl-electron-app build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Validate LoM executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'xmcl-electron-app/build/output/win-unpacked/LoM Launcher.exe')) {
+            throw 'LoM Launcher.exe is missing from Windows build'
+          }
 
       - name: Upload Windows unpacked build
         uses: actions/upload-artifact@v6

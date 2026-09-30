@@ -1,22 +1,14 @@
-import { createHash } from 'crypto'
+import { download, ProgressTrackerSingle, type DownloadBaseOptions } from '@xmcl/file-transfer'
+import { InstallInstanceTask } from '@xmcl/runtime-api'
 import { mkdir, readFile, rename, unlink, writeFile } from 'fs-extra'
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'path'
 import { Inject, LauncherAppKey } from '~/app'
+import { kTasks, TaskInstance, Tasks } from '~/infra'
+import { kDownloadOptions } from '~/network'
 import { AbstractService } from '~/service'
 import { LauncherApp } from '../app/LauncherApp'
-
-type LoMManifestFile = {
-  path: string
-  sha1: string
-  url?: string
-  size?: number
-}
-
-type LoMManifest = {
-  version: string
-  files: LoMManifestFile[]
-  delete?: string[]
-}
+import { LoMManifest, LoMManifestFile, normalizeLoMManifest } from './lomDistribution'
+import { isLoMTextFile, LoMIntegrityError, validateLoMFileBytes } from './lomFileIntegrity'
 
 export type LoMUpdateResult = {
   version: string
@@ -41,7 +33,11 @@ export type LoMUpdateProgress = {
   error?: string
 }
 
-const MANIFEST_URL = process.env.LOM_UPDATE_MANIFEST_URL || 'https://raw.githubusercontent.com/nondename/LoM-Launcher-XMCL/lom-updater-test-assets/lom-update/manifest.json'
+const MANIFEST_URL = process.env.LOM_UPDATE_MANIFEST_URL
+  || 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
+const MAX_DOWNLOAD_ATTEMPTS = 4
+const RETRY_BASE_DELAY_MS = 750
+const DOWNLOAD_PROGRESS_INTERVAL_MS = 100
 
 function safePath(root: string, filePath: string) {
   const normalized = normalize(filePath).replace(/^([/\\])+/, '')
@@ -54,14 +50,59 @@ function safePath(root: string, filePath: string) {
   return target
 }
 
-function sha1(data: Buffer) {
-  return createHash('sha1').update(data).digest('hex')
-}
-
 function abortError() {
   const error = new Error('LoM update cancelled')
   error.name = 'AbortError'
   return error
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+function getDownloadStatus(error: unknown): number | undefined {
+  const seen = new Set<unknown>()
+  let current: any = error
+  for (let depth = 0; depth < 5 && current && !seen.has(current); depth++) {
+    seen.add(current)
+    for (const key of ['status', 'statusCode']) {
+      const value = Number(current[key])
+      if (Number.isInteger(value) && value >= 100 && value <= 599) return value
+    }
+    current = current.cause
+  }
+  return undefined
+}
+
+function isRetryableStatus(status: number | undefined) {
+  return status === undefined || status === 403 || status === 408 || status === 425 || status === 429 || status >= 500
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  const units = ['KB', 'MB', 'GB']
+  let value = bytes / 1024
+  let unit = units[0]
+  for (let i = 1; i < units.length && value >= 1024; i++) {
+    value /= 1024
+    unit = units[i]
+  }
+  return `${value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${unit}`
+}
+
+async function waitForRetry(ms: number, signal: AbortSignal) {
+  if (signal.aborted) throw abortError()
+  await new Promise<void>((resolvePromise, rejectPromise) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      rejectPromise(abortError())
+    }
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort)
+      resolvePromise()
+    }, ms)
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 export class LoMUpdateService extends AbstractService {
@@ -72,7 +113,11 @@ export class LoMUpdateService extends AbstractService {
     bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0,
   }
 
-  constructor(@Inject(LauncherAppKey) app: LauncherApp) {
+  constructor(
+    @Inject(LauncherAppKey) app: LauncherApp,
+    @Inject(kTasks) private tasks: Tasks,
+    @Inject(kDownloadOptions) private downloadOptions: DownloadBaseOptions,
+  ) {
     super(app)
   }
 
@@ -88,11 +133,8 @@ export class LoMUpdateService extends AbstractService {
     this.log(`[LoM Updater] Fetch manifest: ${MANIFEST_URL}`)
     const manifestResponse = await this.app.fetch(MANIFEST_URL, { cache: 'no-store', signal })
     if (!manifestResponse.ok) throw new Error(`[LoM Updater] Manifest HTTP ${manifestResponse.status}: ${MANIFEST_URL}`)
-    const manifest = await manifestResponse.json() as LoMManifest
-    if (!manifest || typeof manifest.version !== 'string' || !Array.isArray(manifest.files)) {
-      throw new Error('[LoM Updater] Invalid manifest')
-    }
-    return manifest
+    const rawManifest = await manifestResponse.json() as unknown
+    return normalizeLoMManifest(rawManifest, MANIFEST_URL)
   }
 
   async check(instancePath: string): Promise<LoMUpdateStatus> {
@@ -113,7 +155,7 @@ export class LoMUpdateService extends AbstractService {
 
   cancel(instancePath: string): boolean {
     const controller = this.controllers.get(instancePath)
-    if (!controller || this.progress.phase !== 'downloading') return false
+    if (!controller || !['checking', 'downloading'].includes(this.progress.phase)) return false
     this.setProgress({ phase: 'cancelling', bytesPerSecond: 0 })
     controller.abort()
     this.log(`[LoM Updater] Cancellation requested: ${instancePath}`)
@@ -124,11 +166,18 @@ export class LoMUpdateService extends AbstractService {
     const current = this.running.get(instancePath)
     if (current) return current
 
-    const controller = new AbortController()
+    const nativeTask = this.tasks.create<InstallInstanceTask>({
+      type: 'installInstance',
+      key: `lom-update-${instancePath}`,
+      instancePath,
+      taskId: 'lom-update',
+    })
+    const controller = nativeTask.controller
     this.controllers.set(instancePath, controller)
-    const task = this.doUpdate(instancePath, controller.signal)
+
+    const task = nativeTask.wrap(this.doUpdate(instancePath, controller.signal, nativeTask))
       .catch((e) => {
-        if (controller.signal.aborted) {
+        if (controller.signal.aborted || isAbortError(e)) {
           this.progress = {
             phase: 'idle', filesDone: 0, filesTotal: 0,
             bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0,
@@ -148,57 +197,233 @@ export class LoMUpdateService extends AbstractService {
     return task
   }
 
-  private async doUpdate(instancePath: string, signal: AbortSignal): Promise<LoMUpdateResult> {
+  private setTaskDownloadState(
+    task: TaskInstance<InstallInstanceTask>,
+    fileIndex: number,
+    fileTotal: number,
+    filePath: string,
+    fileBytes: number,
+    fileSize: number,
+    attempt: number,
+  ) {
+    const retry = attempt > 1 ? ` · retry ${attempt}/${MAX_DOWNLOAD_ATTEMPTS}` : ''
+    const size = fileSize > 0 ? ` · ${formatBytes(fileBytes)}/${formatBytes(fileSize)}` : ` · ${formatBytes(fileBytes)}`
+    task.substate = {
+      type: 'install-instance.download',
+      count: `${fileIndex}/${fileTotal} · ${filePath}${size}${retry}`,
+    } as any
+  }
+
+  private async getReusableStagedBytes(temp: string, file: LoMManifestFile) {
+    if (!file.hash || !file.hashAlgorithm) return undefined
+    try {
+      const data = await readFile(temp)
+      const validation = validateLoMFileBytes(data, file)
+      if (!validation.valid) return undefined
+      if (validation.eolCompatible) {
+        this.log(`[LoM Updater] Reuse LF text compatible with CRLF manifest: ${file.path}`)
+      }
+      return data.length
+    } catch {
+      return undefined
+    }
+  }
+
+  private async downloadToTemp(
+    url: string,
+    temp: string,
+    file: LoMManifestFile,
+    signal: AbortSignal,
+    onProgress: (downloaded: number, total: number, activeUrl: string) => void,
+  ) {
+    await mkdir(dirname(temp), { recursive: true })
+    await unlink(temp).catch(() => undefined)
+
+    const tracker = new ProgressTrackerSingle()
+    const report = () => {
+      const downloaded = tracker.progress
+      const total = tracker.total || file.size || downloaded
+      onProgress(downloaded, total, tracker.url || url)
+    }
+    const timer = setInterval(report, DOWNLOAD_PROGRESS_INTERVAL_MS)
+    timer.unref?.()
+
+    try {
+      await download({
+        ...this.downloadOptions,
+        url,
+        destination: temp,
+        signal,
+        tracker,
+        // Text files can have a Windows CRLF size in distribution.json while
+        // raw.githubusercontent.com serves the canonical LF Git blob. Let the
+        // HTTP response define their actual transfer size.
+        expectedTotal: !isLoMTextFile(file.path) && file.size ? file.size : undefined,
+      })
+      report()
+      if (signal.aborted) throw abortError()
+
+      const data = await readFile(temp)
+      const validation = validateLoMFileBytes(data, file)
+      if (!validation.valid) throw new LoMIntegrityError(file, validation)
+      if (validation.eolCompatible) {
+        this.log(`[LoM Updater] Accepted LF Git blob for CRLF manifest entry: ${file.path} (${data.length}/${file.size || data.length} bytes)`)
+      }
+      return data.length
+    } catch (e) {
+      if (signal.aborted || isAbortError(e)) throw abortError()
+      throw e
+    } finally {
+      clearInterval(timer)
+    }
+  }
+
+  private async doUpdate(
+    instancePath: string,
+    signal: AbortSignal,
+    task: TaskInstance<InstallInstanceTask>,
+  ): Promise<LoMUpdateResult> {
     this.progress = { phase: 'checking', filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0 }
+    task.substate = { type: 'install-instance.resolve' }
+    task.progress = { total: 0, progress: 0 }
+
     const manifest = await this.fetchManifest(signal)
     if (signal.aborted) throw abortError()
 
     const manifestBase = new URL('.', MANIFEST_URL)
     const pending: LoMManifestFile[] = []
     for (const file of manifest.files) {
-      if (!file?.path || !/^[a-f0-9]{40}$/i.test(file.sha1)) throw new Error(`[LoM Updater] Invalid file entry: ${JSON.stringify(file)}`)
-      try {
-        if (sha1(await readFile(safePath(instancePath, file.path))) === file.sha1.toLowerCase()) continue
-      } catch { /* missing */ }
+      if (!file?.path) throw new Error(`[LoM Updater] Invalid file entry: ${JSON.stringify(file)}`)
+      if (file.hash && !file.hashAlgorithm) throw new Error(`[LoM Updater] Missing hash algorithm: ${file.path}`)
+      if (file.hashAlgorithm === 'sha1' && file.hash && !/^[a-f0-9]{40}$/i.test(file.hash)) {
+        throw new Error(`[LoM Updater] Invalid SHA-1: ${file.path}`)
+      }
+      if (file.hashAlgorithm === 'md5' && file.hash && !/^[a-f0-9]{32}$/i.test(file.hash)) {
+        throw new Error(`[LoM Updater] Invalid MD5: ${file.path}`)
+      }
+
+      // Files without a published checksum (currently only options.txt) are
+      // refreshed whenever the pack version changes. Hashed text files accept
+      // the Git LF blob when the manifest was generated from an equivalent
+      // Windows CRLF checkout.
+      if (file.hash && file.hashAlgorithm) {
+        try {
+          const data = await readFile(safePath(instancePath, file.path))
+          if (validateLoMFileBytes(data, file).valid) continue
+        } catch { /* missing */ }
+      }
       pending.push(file)
     }
 
+    const bytesTotal = pending.reduce((sum, file) => sum + (file.size || 0), 0)
     this.setProgress({
       phase: pending.length ? 'downloading' : 'installing',
       filesTotal: pending.length,
-      bytesTotal: pending.reduce((sum, file) => sum + (file.size || 0), 0),
+      bytesTotal,
     })
 
     let changed = 0
     let deleted = 0
+    let completedBytes = 0
+    let effectiveBytesTotal = bytesTotal
     const startedAt = Date.now()
     const staged: Array<{ destination: string, temp: string }> = []
 
     try {
       // Download and verify every file first. Nothing in the live instance is
       // replaced while cancellation is still available.
-      for (const file of pending) {
+      for (let fileOffset = 0; fileOffset < pending.length; fileOffset++) {
+        const file = pending[fileOffset]
         if (signal.aborted) throw abortError()
+        const fileIndex = fileOffset + 1
         this.setProgress({ currentFile: file.path })
         const destination = safePath(instancePath, file.path)
         const temp = `${destination}.lom-update`
         const url = file.url ? new URL(file.url, manifestBase).toString() : new URL(file.path.replace(/\\/g, '/'), manifestBase).toString()
-        this.log(`[LoM Updater] Download ${file.path} <- ${url}`)
-        const response = await this.app.fetch(url, { cache: 'no-store', signal })
-        if (!response.ok) throw new Error(`[LoM Updater] HTTP ${response.status} downloading ${file.path}: ${url}`)
-        const data = Buffer.from(await response.arrayBuffer())
-        if (signal.aborted) throw abortError()
-        const actual = sha1(data)
-        if (actual !== file.sha1.toLowerCase()) throw new Error(`[LoM Updater] SHA-1 mismatch ${file.path}: expected=${file.sha1}, actual=${actual}`)
 
-        await mkdir(dirname(destination), { recursive: true })
+        const reusableBytes = await this.getReusableStagedBytes(temp, file)
+        if (reusableBytes !== undefined) {
+          staged.push({ destination, temp })
+          changed++
+          completedBytes += reusableBytes
+          effectiveBytesTotal += reusableBytes - (file.size || reusableBytes)
+          const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001)
+          const bytesPerSecond = Math.round(completedBytes / seconds)
+          this.setProgress({ filesDone: changed, bytesDone: completedBytes, bytesTotal: effectiveBytesTotal, bytesPerSecond })
+          this.setTaskDownloadState(task, fileIndex, pending.length, file.path, reusableBytes, reusableBytes, 1)
+          task.progress = { url, total: effectiveBytesTotal || completedBytes || 1, progress: completedBytes, speed: bytesPerSecond, acceptRanges: false }
+          this.log(`[LoM Updater] Reuse staged ${fileIndex}/${pending.length} ${file.path}`)
+          continue
+        }
         await unlink(temp).catch(() => undefined)
-        await writeFile(temp, data)
-        staged.push({ destination, temp })
-        changed++
-        const bytesDone = this.progress.bytesDone + data.length
-        const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001)
-        this.setProgress({ filesDone: changed, bytesDone, bytesPerSecond: Math.round(bytesDone / seconds) })
+
+        let downloaded = 0
+        let completed = false
+        for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt++) {
+          if (signal.aborted) throw abortError()
+          this.setTaskDownloadState(task, fileIndex, pending.length, file.path, 0, file.size || 0, attempt)
+          this.log(`[LoM Updater] Download ${fileIndex}/${pending.length} attempt=${attempt}/${MAX_DOWNLOAD_ATTEMPTS} ${file.path} <- ${url}`)
+
+          try {
+            downloaded = await this.downloadToTemp(url, temp, file, signal, (fileBytes, fileTotal, activeUrl) => {
+              const bytesDone = completedBytes + fileBytes
+              const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001)
+              const bytesPerSecond = Math.round(bytesDone / seconds)
+              this.setProgress({ bytesDone, bytesPerSecond })
+              this.setTaskDownloadState(task, fileIndex, pending.length, file.path, fileBytes, fileTotal || file.size || 0, attempt)
+              task.progress = {
+                url: activeUrl || url,
+                total: effectiveBytesTotal || bytesDone || 1,
+                progress: bytesDone,
+                speed: bytesPerSecond,
+                acceptRanges: false,
+              }
+            })
+
+            staged.push({ destination, temp })
+            changed++
+            completedBytes += downloaded
+            effectiveBytesTotal += downloaded - (file.size || downloaded)
+            const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001)
+            const bytesPerSecond = Math.round(completedBytes / seconds)
+            this.setProgress({ filesDone: changed, bytesDone: completedBytes, bytesTotal: effectiveBytesTotal, bytesPerSecond })
+            task.progress = {
+              url,
+              total: effectiveBytesTotal || completedBytes || 1,
+              progress: completedBytes,
+              speed: bytesPerSecond,
+              acceptRanges: false,
+            }
+            completed = true
+            break
+          } catch (e) {
+            await unlink(temp).catch(() => undefined)
+            if (signal.aborted || isAbortError(e)) throw abortError()
+
+            const status = getDownloadStatus(e)
+            const retryable = !(e instanceof LoMIntegrityError)
+              && attempt < MAX_DOWNLOAD_ATTEMPTS
+              && isRetryableStatus(status)
+            const message = e instanceof Error ? e.message : String(e)
+            this.warn(`[LoM Updater] Download failed ${fileIndex}/${pending.length} attempt=${attempt}/${MAX_DOWNLOAD_ATTEMPTS} status=${status ?? 'network'} retry=${retryable}: ${message}`)
+            if (!retryable) throw e
+
+            const retryDelay = Math.min(RETRY_BASE_DELAY_MS * (2 ** (attempt - 1)), 15_000)
+            this.setProgress({ bytesDone: completedBytes, bytesPerSecond: 0 })
+            task.progress = {
+              url,
+              total: effectiveBytesTotal || completedBytes || 1,
+              progress: completedBytes,
+              speed: 0,
+              acceptRanges: false,
+            }
+            await waitForRetry(retryDelay, signal)
+          }
+        }
+
+        if (!completed) {
+          throw new Error(`[LoM Updater] Exhausted download attempts for ${file.path}`)
+        }
       }
 
       if (signal.aborted) throw abortError()
@@ -206,9 +431,14 @@ export class LoMUpdateService extends AbstractService {
       // Installation is intentionally non-cancellable. From this point onward
       // staged, hash-verified files are committed to the live instance.
       this.setProgress({ phase: 'installing', currentFile: undefined, bytesPerSecond: 0 })
+      task.substate = { type: 'install-instance.link', count: staged.length }
+      task.progress = { total: staged.length || 1, progress: 0 }
+      let installed = 0
       for (const { destination, temp } of staged) {
         await unlink(destination).catch(() => undefined)
         await rename(temp, destination)
+        installed++
+        task.progress = { total: staged.length || 1, progress: installed }
       }
 
       for (const relativePath of manifest.delete ?? []) {
@@ -225,12 +455,16 @@ export class LoMUpdateService extends AbstractService {
       const statePath = join(instancePath, '.lom-update.json')
       await writeFile(statePath, JSON.stringify({ version: manifest.version, updatedAt: new Date().toISOString() }, null, 2), 'utf8')
       this.setProgress({ phase: 'done', error: undefined, currentFile: undefined, bytesPerSecond: 0 })
+      task.progress = { total: 1, progress: 1 }
       this.log(`[LoM Updater] Ready version=${manifest.version}, changed=${changed}, deleted=${deleted}`)
       return { version: manifest.version, changed, deleted }
     } catch (e) {
-      // Remove only staging files. Existing live files stay untouched when a
-      // download is cancelled or fails before the installation phase.
-      await Promise.all(staged.map(({ temp }) => unlink(temp).catch(() => undefined)))
+      // Keep fully downloaded, hash-verified staging files. A later retry can
+      // resume from them instead of redownloading hundreds of already valid
+      // pack files. Partial/current files are removed inside the retry loop.
+      if (staged.length > 0) {
+        this.log(`[LoM Updater] Keeping ${staged.length} verified staged files for retry/resume`)
+      }
       throw e
     }
   }
