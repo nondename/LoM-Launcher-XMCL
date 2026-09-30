@@ -44,6 +44,10 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
     return (await this.getLoMUpdater()).update(path)
   }
 
+  async cancelLoMUpdate(path: string): Promise<boolean> {
+    return (await this.getLoMUpdater()).cancel(path)
+  }
+
   async getLoMUpdateProgress(): Promise<LoMUpdateProgress> {
     return (await this.getLoMUpdater()).getProgress()
   }
