@@ -108,7 +108,12 @@ function createLomUpdate() {
 
   let progressTimer: ReturnType<typeof setInterval> | undefined
   async function run(instancePath = path.value) {
-    if (!instancePath || !isLoM.value || isBedrock.value || updating.value) return
+    if (!instancePath || !isLoM.value || isBedrock.value) return
+    if (cancellable.value) {
+      await cancel(instancePath)
+      return
+    }
+    if (updating.value) return
     skippedRemoteVersion.value = undefined
     progress.value = { ...idleProgress(), phase: 'checking' }
     if (progressTimer) clearInterval(progressTimer)
