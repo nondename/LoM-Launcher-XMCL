@@ -38,6 +38,7 @@ type DistributionServer = {
 type Distribution = {
   version?: unknown
   servers?: unknown
+  delete?: unknown
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -162,10 +163,13 @@ export function normalizeLoMManifest(raw: unknown, sourceUrl: string): LoMManife
 
   if (!server) throw new Error('[LoM Updater] Invalid distribution: LoM server is missing')
 
-  const version = typeof server.version === 'string'
-    ? server.version
-    : typeof distribution.version === 'string'
-      ? distribution.version
+  // distribution.version is the pack updater revision. The server version is
+  // kept as a fallback for older manifests, but it should not mask pack-only
+  // updates where Minecraft/Forge/server metadata did not change.
+  const version = typeof distribution.version === 'string'
+    ? distribution.version
+    : typeof server.version === 'string'
+      ? server.version
       : undefined
   if (!version) throw new Error('[LoM Updater] Invalid distribution: version is missing')
 
@@ -187,11 +191,21 @@ export function normalizeLoMManifest(raw: unknown, sourceUrl: string): LoMManife
     throw new Error('[LoM Updater] Distribution contains no game files')
   }
 
+  const deletePaths = Array.isArray(distribution.delete)
+    ? distribution.delete
+      .filter((value): value is string => typeof value === 'string')
+      .map(decodePath)
+      .filter(validPackPath)
+    : []
+
   return {
     version,
     files: [...files.values()],
-    // Cleanup the marker left by the pre-v0.1 production build which was
-    // accidentally wired to the updater test manifest.
-    delete: ['config/lom-updater-test.txt'],
+    delete: [...new Set([
+      // Cleanup the marker left by the pre-v0.1 production build which was
+      // accidentally wired to the updater test manifest.
+      'config/lom-updater-test.txt',
+      ...deletePaths,
+    ])],
   }
 }
