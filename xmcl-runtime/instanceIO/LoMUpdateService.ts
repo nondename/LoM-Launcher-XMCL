@@ -31,7 +31,7 @@ export type LoMUpdateStatus = {
 }
 
 export type LoMUpdateProgress = {
-  phase: 'idle' | 'checking' | 'downloading' | 'installing' | 'done' | 'error'
+  phase: 'idle' | 'checking' | 'downloading' | 'cancelling' | 'installing' | 'done' | 'error'
   filesDone: number
   filesTotal: number
   bytesDone: number
@@ -58,8 +58,15 @@ function sha1(data: Buffer) {
   return createHash('sha1').update(data).digest('hex')
 }
 
+function abortError() {
+  const error = new Error('LoM update cancelled')
+  error.name = 'AbortError'
+  return error
+}
+
 export class LoMUpdateService extends AbstractService {
   private running = new Map<string, Promise<LoMUpdateResult>>()
+  private controllers = new Map<string, AbortController>()
   private progress: LoMUpdateProgress = {
     phase: 'idle', filesDone: 0, filesTotal: 0,
     bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0,
@@ -77,9 +84,9 @@ export class LoMUpdateService extends AbstractService {
     Object.assign(this.progress, patch)
   }
 
-  private async fetchManifest(): Promise<LoMManifest> {
+  private async fetchManifest(signal?: AbortSignal): Promise<LoMManifest> {
     this.log(`[LoM Updater] Fetch manifest: ${MANIFEST_URL}`)
-    const manifestResponse = await this.app.fetch(MANIFEST_URL, { cache: 'no-store' })
+    const manifestResponse = await this.app.fetch(MANIFEST_URL, { cache: 'no-store', signal })
     if (!manifestResponse.ok) throw new Error(`[LoM Updater] Manifest HTTP ${manifestResponse.status}: ${MANIFEST_URL}`)
     const manifest = await manifestResponse.json() as LoMManifest
     if (!manifest || typeof manifest.version !== 'string' || !Array.isArray(manifest.files)) {
@@ -104,23 +111,47 @@ export class LoMUpdateService extends AbstractService {
     }
   }
 
+  cancel(instancePath: string): boolean {
+    const controller = this.controllers.get(instancePath)
+    if (!controller || this.progress.phase !== 'downloading') return false
+    this.setProgress({ phase: 'cancelling', bytesPerSecond: 0 })
+    controller.abort()
+    this.log(`[LoM Updater] Cancellation requested: ${instancePath}`)
+    return true
+  }
+
   update(instancePath: string): Promise<LoMUpdateResult> {
     const current = this.running.get(instancePath)
     if (current) return current
-    const task = this.doUpdate(instancePath)
+
+    const controller = new AbortController()
+    this.controllers.set(instancePath, controller)
+    const task = this.doUpdate(instancePath, controller.signal)
       .catch((e) => {
+        if (controller.signal.aborted) {
+          this.progress = {
+            phase: 'idle', filesDone: 0, filesTotal: 0,
+            bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0,
+          }
+          this.log(`[LoM Updater] Cancelled: ${instancePath}`)
+          throw e
+        }
         const error = e instanceof Error ? e.message : String(e)
         this.setProgress({ phase: 'error', error, currentFile: undefined, bytesPerSecond: 0 })
         throw e
       })
-      .finally(() => this.running.delete(instancePath))
+      .finally(() => {
+        this.running.delete(instancePath)
+        this.controllers.delete(instancePath)
+      })
     this.running.set(instancePath, task)
     return task
   }
 
-  private async doUpdate(instancePath: string): Promise<LoMUpdateResult> {
+  private async doUpdate(instancePath: string, signal: AbortSignal): Promise<LoMUpdateResult> {
     this.progress = { phase: 'checking', filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0 }
-    const manifest = await this.fetchManifest()
+    const manifest = await this.fetchManifest(signal)
+    if (signal.aborted) throw abortError()
 
     const manifestBase = new URL('.', MANIFEST_URL)
     const pending: LoMManifestFile[] = []
@@ -141,44 +172,66 @@ export class LoMUpdateService extends AbstractService {
     let changed = 0
     let deleted = 0
     const startedAt = Date.now()
-    for (const file of pending) {
-      this.setProgress({ currentFile: file.path })
-      const destination = safePath(instancePath, file.path)
-      const url = file.url ? new URL(file.url, manifestBase).toString() : new URL(file.path.replace(/\\/g, '/'), manifestBase).toString()
-      this.log(`[LoM Updater] Download ${file.path} <- ${url}`)
-      const response = await this.app.fetch(url, { cache: 'no-store' })
-      if (!response.ok) throw new Error(`[LoM Updater] HTTP ${response.status} downloading ${file.path}: ${url}`)
-      const data = Buffer.from(await response.arrayBuffer())
-      const actual = sha1(data)
-      if (actual !== file.sha1.toLowerCase()) throw new Error(`[LoM Updater] SHA-1 mismatch ${file.path}: expected=${file.sha1}, actual=${actual}`)
+    const staged: Array<{ destination: string, temp: string }> = []
 
-      await mkdir(dirname(destination), { recursive: true })
-      const temp = `${destination}.lom-update`
-      await writeFile(temp, data)
-      await unlink(destination).catch(() => undefined)
-      await rename(temp, destination)
-      changed++
-      const bytesDone = this.progress.bytesDone + data.length
-      const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001)
-      this.setProgress({ filesDone: changed, bytesDone, bytesPerSecond: Math.round(bytesDone / seconds) })
-    }
+    try {
+      // Download and verify every file first. Nothing in the live instance is
+      // replaced while cancellation is still available.
+      for (const file of pending) {
+        if (signal.aborted) throw abortError()
+        this.setProgress({ currentFile: file.path })
+        const destination = safePath(instancePath, file.path)
+        const temp = `${destination}.lom-update`
+        const url = file.url ? new URL(file.url, manifestBase).toString() : new URL(file.path.replace(/\\/g, '/'), manifestBase).toString()
+        this.log(`[LoM Updater] Download ${file.path} <- ${url}`)
+        const response = await this.app.fetch(url, { cache: 'no-store', signal })
+        if (!response.ok) throw new Error(`[LoM Updater] HTTP ${response.status} downloading ${file.path}: ${url}`)
+        const data = Buffer.from(await response.arrayBuffer())
+        if (signal.aborted) throw abortError()
+        const actual = sha1(data)
+        if (actual !== file.sha1.toLowerCase()) throw new Error(`[LoM Updater] SHA-1 mismatch ${file.path}: expected=${file.sha1}, actual=${actual}`)
 
-    this.setProgress({ phase: 'installing', currentFile: undefined })
-    for (const relativePath of manifest.delete ?? []) {
-      const target = safePath(instancePath, relativePath)
-      try {
-        await unlink(target)
-        deleted++
-        this.log(`[LoM Updater] Delete ${relativePath}`)
-      } catch (e: any) {
-        if (e?.code !== 'ENOENT') throw e
+        await mkdir(dirname(destination), { recursive: true })
+        await unlink(temp).catch(() => undefined)
+        await writeFile(temp, data)
+        staged.push({ destination, temp })
+        changed++
+        const bytesDone = this.progress.bytesDone + data.length
+        const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001)
+        this.setProgress({ filesDone: changed, bytesDone, bytesPerSecond: Math.round(bytesDone / seconds) })
       }
-    }
 
-    const statePath = join(instancePath, '.lom-update.json')
-    await writeFile(statePath, JSON.stringify({ version: manifest.version, updatedAt: new Date().toISOString() }, null, 2), 'utf8')
-    this.setProgress({ phase: 'done', error: undefined, currentFile: undefined, bytesPerSecond: 0 })
-    this.log(`[LoM Updater] Ready version=${manifest.version}, changed=${changed}, deleted=${deleted}`)
-    return { version: manifest.version, changed, deleted }
+      if (signal.aborted) throw abortError()
+
+      // Installation is intentionally non-cancellable. From this point onward
+      // staged, hash-verified files are committed to the live instance.
+      this.setProgress({ phase: 'installing', currentFile: undefined, bytesPerSecond: 0 })
+      for (const { destination, temp } of staged) {
+        await unlink(destination).catch(() => undefined)
+        await rename(temp, destination)
+      }
+
+      for (const relativePath of manifest.delete ?? []) {
+        const target = safePath(instancePath, relativePath)
+        try {
+          await unlink(target)
+          deleted++
+          this.log(`[LoM Updater] Delete ${relativePath}`)
+        } catch (e: any) {
+          if (e?.code !== 'ENOENT') throw e
+        }
+      }
+
+      const statePath = join(instancePath, '.lom-update.json')
+      await writeFile(statePath, JSON.stringify({ version: manifest.version, updatedAt: new Date().toISOString() }, null, 2), 'utf8')
+      this.setProgress({ phase: 'done', error: undefined, currentFile: undefined, bytesPerSecond: 0 })
+      this.log(`[LoM Updater] Ready version=${manifest.version}, changed=${changed}, deleted=${deleted}`)
+      return { version: manifest.version, changed, deleted }
+    } catch (e) {
+      // Remove only staging files. Existing live files stay untouched when a
+      // download is cancelled or fails before the installation phase.
+      await Promise.all(staged.map(({ temp }) => unlink(temp).catch(() => undefined)))
+      throw e
+    }
   }
 }
