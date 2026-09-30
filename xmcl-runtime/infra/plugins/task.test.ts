@@ -1,6 +1,7 @@
 import { context, propagation, SpanStatusCode, trace } from '@opentelemetry/api'
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base'
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node'
+import { TaskState } from '@xmcl/runtime-api'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { setRuntimeTelemetryEnabled } from '../telemetry_context'
 import { type Tasks, kTasks } from '../task'
@@ -76,5 +77,27 @@ describe('task telemetry', () => {
     expect(span.status.code).toBe(SpanStatusCode.ERROR)
     expect(span.attributes['error.type']).toBe('Error')
     expect(span.events).toHaveLength(0)
+  })
+
+  it('keeps a cancelled task cancelled when it completes later', async () => {
+    const task = createTasks().create({
+      type: 'installInstance',
+      instancePath: 'test-instance',
+    } as any)
+    let resolve!: () => void
+    const pending = new Promise<void>((r) => {
+      resolve = r
+    })
+    const wrapped = task.wrap(pending)
+
+    task.controller.abort()
+    expect(task.state).toBe(TaskState.Cancelled)
+
+    resolve()
+    await wrapped
+
+    expect(task.state).toBe(TaskState.Cancelled)
+    const [span] = exporter.getFinishedSpans()
+    expect(span.attributes['task.outcome']).toBe('cancelled')
   })
 })
