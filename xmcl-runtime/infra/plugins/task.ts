@@ -129,6 +129,9 @@ export const pluginTasks: LauncherAppPlugin = (app) => {
         checkTaskCompleted()
       })
       const onComplete = () => {
+        if (obj.state === TaskState.Cancelled) {
+          return
+        }
         obj.state = TaskState.Succeed
         endTaskSpan('success')
         checkTaskCompleted()
