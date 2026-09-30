@@ -18,19 +18,22 @@ let sharedLomUpdate: ReturnType<typeof createLomUpdate> | undefined
 
 function createLomUpdate() {
   const { path, instance } = injection(kInstance)
-  const { checkLoMUpdate, applyLoMUpdate, getLoMUpdateProgress } = useService(XUpdateServiceKey)
+  const { checkLoMUpdate, applyLoMUpdate, cancelLoMUpdate, getLoMUpdateProgress } = useService(XUpdateServiceKey)
 
   const status = ref<LoMUpdateStatus>()
   const progress = ref<LoMUpdateProgress>(idleProgress())
   const checking = ref(false)
+  const skippedRemoteVersion = ref<string>()
 
   const isBedrock = computed(() => isBedrockInstance(instance.value))
   const isLoM = computed(() => isLoMProfile(instance.value))
   const updating = computed(() =>
     progress.value.phase === 'checking' ||
     progress.value.phase === 'downloading' ||
+    progress.value.phase === 'cancelling' ||
     progress.value.phase === 'installing',
   )
+  const cancellable = computed(() => isLoM.value && progress.value.phase === 'downloading')
   const initialChecking = computed(() => checking.value && status.value === undefined)
   const percentage = computed(() => {
     if (progress.value.bytesTotal > 0) {
@@ -47,20 +50,32 @@ function createLomUpdate() {
     if (initialChecking.value) return 'Проверка обновлений…'
     switch (progress.value.phase) {
       case 'checking': return 'Проверка обновлений…'
-      case 'downloading': return `Загрузка… ${percentage.value}%`
+      case 'downloading': return percentage.value > 0 ? `Отменить загрузку (${percentage.value}%)` : 'Отменить загрузку'
+      case 'cancelling': return 'Отмена…'
       case 'installing': return 'Установка…'
       case 'error': return status.value?.installedVersion ? 'Повторить обновление' : 'Повторить установку'
     }
     if (status.value?.available) {
+      if (status.value.installedVersion && skippedRemoteVersion.value === status.value.remoteVersion) return undefined
       return status.value.installedVersion ? 'Обновить' : 'Установить'
     }
     return undefined
   })
 
-  const buttonLoading = computed(() => isLoM.value && (initialChecking.value || updating.value))
+  // Keep the main launch button clickable while downloading so it can act as
+  // the cancellation control. Checking/cancelling/installing remain locked.
+  const buttonLoading = computed(() => isLoM.value && (
+    initialChecking.value ||
+    progress.value.phase === 'checking' ||
+    progress.value.phase === 'cancelling' ||
+    progress.value.phase === 'installing'
+  ))
   const actionable = computed(() => isLoM.value && (
+    cancellable.value ||
     progress.value.phase === 'error' ||
-    (!!status.value?.available && !buttonLoading.value)
+    (!!status.value?.available && !buttonLoading.value && !(
+      !!status.value.installedVersion && skippedRemoteVersion.value === status.value.remoteVersion
+    ))
   ))
 
   let statusRequest = 0
@@ -71,7 +86,10 @@ function createLomUpdate() {
     checking.value = true
     try {
       const next = await checkLoMUpdate(instancePath)
-      if (request === statusRequest && path.value === instancePath && isLoM.value) status.value = next
+      if (request === statusRequest && path.value === instancePath && isLoM.value) {
+        if (skippedRemoteVersion.value && skippedRemoteVersion.value !== next.remoteVersion) skippedRemoteVersion.value = undefined
+        status.value = next
+      }
     } catch (e) {
       console.error('[LoM updater] Failed to check update status', e)
     } finally {
@@ -91,13 +109,16 @@ function createLomUpdate() {
   let progressTimer: ReturnType<typeof setInterval> | undefined
   async function run(instancePath = path.value) {
     if (!instancePath || !isLoM.value || isBedrock.value || updating.value) return
+    skippedRemoteVersion.value = undefined
     progress.value = { ...idleProgress(), phase: 'checking' }
     if (progressTimer) clearInterval(progressTimer)
     progressTimer = setInterval(() => { void syncProgress() }, 250)
     try {
       await applyLoMUpdate(instancePath)
     } catch (e) {
-      console.error('[LoM updater] Update failed', e)
+      await syncProgress()
+      // A user cancellation returns the updater to idle and is not an error.
+      if (progress.value.phase !== 'idle') console.error('[LoM updater] Update failed', e)
     } finally {
       if (progressTimer) {
         clearInterval(progressTimer)
@@ -108,12 +129,32 @@ function createLomUpdate() {
     }
   }
 
+  async function cancel(instancePath = path.value) {
+    if (!instancePath || !isLoM.value || !cancellable.value) return false
+    if (status.value?.installedVersion && status.value.remoteVersion) {
+      // After cancelling an optional update, let the user launch the currently
+      // installed revision. A newer remote revision will be offered again.
+      skippedRemoteVersion.value = status.value.remoteVersion
+    }
+    progress.value = { ...progress.value, phase: 'cancelling', bytesPerSecond: 0 }
+    try {
+      const accepted = await cancelLoMUpdate(instancePath)
+      if (!accepted) await syncProgress()
+      return accepted
+    } catch (e) {
+      console.error('[LoM updater] Failed to cancel update', e)
+      await syncProgress()
+      return false
+    }
+  }
+
   // Startup and profile changes only check whether an install/update exists.
   // Downloading starts exclusively from the user's explicit launch-button click.
   watch([path, isBedrock, isLoM], () => {
     status.value = undefined
     progress.value = idleProgress()
     checking.value = false
+    skippedRemoteVersion.value = undefined
     statusRequest++
     if (isLoM.value) void refresh()
   }, { immediate: true })
@@ -127,6 +168,7 @@ function createLomUpdate() {
     progress,
     checking,
     updating,
+    cancellable,
     initialChecking,
     percentage,
     buttonText,
@@ -134,6 +176,7 @@ function createLomUpdate() {
     actionable,
     refresh,
     run,
+    cancel,
   }
 }
 
