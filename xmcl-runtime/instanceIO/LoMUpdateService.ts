@@ -4,7 +4,7 @@ import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'pa
 import { Inject, LauncherAppKey } from '~/app'
 import { AbstractService } from '~/service'
 import { LauncherApp } from '../app/LauncherApp'
-import { LoMHashAlgorithm, LoMManifest, LoMManifestFile, normalizeLoMManifest } from './lomDistribution'
+import { getLoMDownloadUrls, LoMHashAlgorithm, LoMManifest, LoMManifestFile, normalizeLoMManifest } from './lomDistribution'
 
 export type LoMUpdateResult = {
   version: string
@@ -181,11 +181,29 @@ export class LoMUpdateService extends AbstractService {
         this.setProgress({ currentFile: file.path })
         const destination = safePath(instancePath, file.path)
         const temp = `${destination}.lom-update`
-        const url = file.url ? new URL(file.url, manifestBase).toString() : new URL(file.path.replace(/\\/g, '/'), manifestBase).toString()
-        this.log(`[LoM Updater] Download ${file.path} <- ${url}`)
-        const response = await this.app.fetch(url, { cache: 'no-store', signal })
-        if (!response.ok) throw new Error(`[LoM Updater] HTTP ${response.status} downloading ${file.path}: ${url}`)
-        const data = Buffer.from(await response.arrayBuffer())
+        const sourceUrl = file.url
+          ? new URL(file.url, manifestBase).toString()
+          : new URL(file.path.replace(/\\/g, '/'), manifestBase).toString()
+        const candidates = getLoMDownloadUrls(sourceUrl)
+
+        let data: Buffer | undefined
+        let lastError = `[LoM Updater] Failed downloading ${file.path}: ${sourceUrl}`
+        for (let index = 0; index < candidates.length; index++) {
+          const url = candidates[index]
+          this.log(`[LoM Updater] Download ${file.path} <- ${url}`)
+          const response = await this.app.fetch(url, { cache: 'no-store', signal })
+          if (response.ok) {
+            data = Buffer.from(await response.arrayBuffer())
+            break
+          }
+
+          lastError = `[LoM Updater] HTTP ${response.status} downloading ${file.path}: ${url}`
+          const canRetryLiteralPercent = response.status === 404 && index + 1 < candidates.length
+          if (!canRetryLiteralPercent) throw new Error(lastError)
+          this.log(`[LoM Updater] Raw URL returned 404; retry literal-percent filename: ${candidates[index + 1]}`)
+        }
+
+        if (!data) throw new Error(lastError)
         if (signal.aborted) throw abortError()
 
         if (file.hash && file.hashAlgorithm) {
