@@ -4,19 +4,7 @@ import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'pa
 import { Inject, LauncherAppKey } from '~/app'
 import { AbstractService } from '~/service'
 import { LauncherApp } from '../app/LauncherApp'
-
-type LoMManifestFile = {
-  path: string
-  sha1: string
-  url?: string
-  size?: number
-}
-
-type LoMManifest = {
-  version: string
-  files: LoMManifestFile[]
-  delete?: string[]
-}
+import { LoMHashAlgorithm, LoMManifest, LoMManifestFile, normalizeLoMManifest } from './lomDistribution'
 
 export type LoMUpdateResult = {
   version: string
@@ -41,7 +29,8 @@ export type LoMUpdateProgress = {
   error?: string
 }
 
-const MANIFEST_URL = process.env.LOM_UPDATE_MANIFEST_URL || 'https://raw.githubusercontent.com/nondename/LoM-Launcher-XMCL/lom-updater-test-assets/lom-update/manifest.json'
+const MANIFEST_URL = process.env.LOM_UPDATE_MANIFEST_URL
+  || 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
 
 function safePath(root: string, filePath: string) {
   const normalized = normalize(filePath).replace(/^([/\\])+/, '')
@@ -54,8 +43,8 @@ function safePath(root: string, filePath: string) {
   return target
 }
 
-function sha1(data: Buffer) {
-  return createHash('sha1').update(data).digest('hex')
+function checksum(data: Buffer, algorithm: LoMHashAlgorithm) {
+  return createHash(algorithm).update(data).digest('hex')
 }
 
 function abortError() {
@@ -88,11 +77,8 @@ export class LoMUpdateService extends AbstractService {
     this.log(`[LoM Updater] Fetch manifest: ${MANIFEST_URL}`)
     const manifestResponse = await this.app.fetch(MANIFEST_URL, { cache: 'no-store', signal })
     if (!manifestResponse.ok) throw new Error(`[LoM Updater] Manifest HTTP ${manifestResponse.status}: ${MANIFEST_URL}`)
-    const manifest = await manifestResponse.json() as LoMManifest
-    if (!manifest || typeof manifest.version !== 'string' || !Array.isArray(manifest.files)) {
-      throw new Error('[LoM Updater] Invalid manifest')
-    }
-    return manifest
+    const rawManifest = await manifestResponse.json() as unknown
+    return normalizeLoMManifest(rawManifest, MANIFEST_URL)
   }
 
   async check(instancePath: string): Promise<LoMUpdateStatus> {
@@ -156,10 +142,23 @@ export class LoMUpdateService extends AbstractService {
     const manifestBase = new URL('.', MANIFEST_URL)
     const pending: LoMManifestFile[] = []
     for (const file of manifest.files) {
-      if (!file?.path || !/^[a-f0-9]{40}$/i.test(file.sha1)) throw new Error(`[LoM Updater] Invalid file entry: ${JSON.stringify(file)}`)
-      try {
-        if (sha1(await readFile(safePath(instancePath, file.path))) === file.sha1.toLowerCase()) continue
-      } catch { /* missing */ }
+      if (!file?.path) throw new Error(`[LoM Updater] Invalid file entry: ${JSON.stringify(file)}`)
+      if (file.hash && !file.hashAlgorithm) throw new Error(`[LoM Updater] Missing hash algorithm: ${file.path}`)
+      if (file.hashAlgorithm === 'sha1' && file.hash && !/^[a-f0-9]{40}$/i.test(file.hash)) {
+        throw new Error(`[LoM Updater] Invalid SHA-1: ${file.path}`)
+      }
+      if (file.hashAlgorithm === 'md5' && file.hash && !/^[a-f0-9]{32}$/i.test(file.hash)) {
+        throw new Error(`[LoM Updater] Invalid MD5: ${file.path}`)
+      }
+
+      // Files without a published checksum (currently only options.txt) are
+      // refreshed whenever the pack version changes. All normal pack files
+      // from distribution.json are checksum-validated before and after fetch.
+      if (file.hash && file.hashAlgorithm) {
+        try {
+          if (checksum(await readFile(safePath(instancePath, file.path)), file.hashAlgorithm) === file.hash.toLowerCase()) continue
+        } catch { /* missing */ }
+      }
       pending.push(file)
     }
 
@@ -188,8 +187,13 @@ export class LoMUpdateService extends AbstractService {
         if (!response.ok) throw new Error(`[LoM Updater] HTTP ${response.status} downloading ${file.path}: ${url}`)
         const data = Buffer.from(await response.arrayBuffer())
         if (signal.aborted) throw abortError()
-        const actual = sha1(data)
-        if (actual !== file.sha1.toLowerCase()) throw new Error(`[LoM Updater] SHA-1 mismatch ${file.path}: expected=${file.sha1}, actual=${actual}`)
+
+        if (file.hash && file.hashAlgorithm) {
+          const actual = checksum(data, file.hashAlgorithm)
+          if (actual !== file.hash.toLowerCase()) {
+            throw new Error(`[LoM Updater] ${file.hashAlgorithm.toUpperCase()} mismatch ${file.path}: expected=${file.hash}, actual=${actual}`)
+          }
+        }
 
         await mkdir(dirname(destination), { recursive: true })
         await unlink(temp).catch(() => undefined)
