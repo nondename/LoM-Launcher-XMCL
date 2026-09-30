@@ -44,6 +44,26 @@ jobs:
       - name: Test LoM distribution adapter
         run: pnpm vitest run xmcl-runtime/instanceIO/lomDistribution.test.ts
 
+      - name: Validate live LoM pack distribution
+        shell: pwsh
+        run: |
+          @'
+          import { normalizeLoMManifest } from './xmcl-runtime/instanceIO/lomDistribution.ts'
+
+          const source = 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
+          const response = await fetch(source, { cache: 'no-store' })
+          if (!response.ok) throw new Error(`distribution HTTP ${response.status}`)
+          const manifest = normalizeLoMManifest(await response.json(), source)
+          const activeJars = manifest.files.filter((file) => file.path.startsWith('mods/') && file.path.endsWith('.jar'))
+          const disabledJars = manifest.files.filter((file) => file.path.startsWith('mods/') && file.path.endsWith('.jar.deactivation'))
+          console.log(`LoM distribution version=${manifest.version} files=${manifest.files.length} activeMods=${activeJars.length} disabledMods=${disabledJars.length}`)
+          if (activeJars.length < 100) throw new Error(`Suspiciously small LoM mod set: ${activeJars.length}`)
+          if (!manifest.files.some((file) => file.path === 'options.txt')) throw new Error('options.txt missing from normalized manifest')
+          '@ | Set-Content -Encoding utf8 .lom-validate-distribution.ts
+          pnpm tsx .lom-validate-distribution.ts
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Remove-Item .lom-validate-distribution.ts -Force
+
       - name: Build LoM launcher
         shell: pwsh
         env:
