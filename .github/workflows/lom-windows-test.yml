@@ -44,12 +44,12 @@ jobs:
       - name: Test LoM distribution adapter
         run: pnpm vitest run xmcl-runtime/instanceIO/lomDistribution.test.ts
 
-      - name: Validate live LoM pack distribution and download
+      - name: Validate live LoM pack distribution and direct download
         shell: pwsh
         run: |
           @'
           import { createHash } from 'node:crypto'
-          import { getLoMDownloadUrls, normalizeLoMManifest } from './xmcl-runtime/instanceIO/lomDistribution.ts'
+          import { normalizeLoMManifest } from './xmcl-runtime/instanceIO/lomDistribution.ts'
 
           async function main() {
             const source = 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
@@ -66,28 +66,21 @@ jobs:
             if (!securityCraft?.url || securityCraft.hashAlgorithm !== 'md5' || !securityCraft.hash) {
               throw new Error('SecurityCraft artifact is missing from live distribution')
             }
-
-            const candidates = getLoMDownloadUrls(securityCraft.url)
-            let data: Uint8Array | undefined
-            let usedUrl = ''
-            for (const candidate of candidates) {
-              const artifactResponse = await fetch(candidate, { cache: 'no-store' })
-              console.log(`SecurityCraft candidate HTTP ${artifactResponse.status}: ${candidate}`)
-              if (artifactResponse.ok) {
-                data = new Uint8Array(await artifactResponse.arrayBuffer())
-                usedUrl = candidate
-                break
-              }
-              if (artifactResponse.status !== 404) {
-                throw new Error(`Unexpected HTTP ${artifactResponse.status}: ${candidate}`)
-              }
+            if (securityCraft.path.includes('%')) {
+              throw new Error(`SecurityCraft local path is still URL-encoded: ${securityCraft.path}`)
             }
-            if (!data) throw new Error('SecurityCraft could not be downloaded from any candidate URL')
+
+            const artifactResponse = await fetch(securityCraft.url, { cache: 'no-store' })
+            console.log(`SecurityCraft direct HTTP ${artifactResponse.status}: ${securityCraft.url}`)
+            if (!artifactResponse.ok) {
+              throw new Error(`SecurityCraft direct download HTTP ${artifactResponse.status}: ${securityCraft.url}`)
+            }
+            const data = new Uint8Array(await artifactResponse.arrayBuffer())
             const actual = createHash('md5').update(data).digest('hex')
             if (actual !== securityCraft.hash) {
               throw new Error(`SecurityCraft MD5 mismatch expected=${securityCraft.hash} actual=${actual}`)
             }
-            console.log(`SecurityCraft live download OK bytes=${data.length} md5=${actual} url=${usedUrl}`)
+            console.log(`SecurityCraft direct download OK bytes=${data.length} md5=${actual}`)
           }
 
           void main().catch((error) => {
