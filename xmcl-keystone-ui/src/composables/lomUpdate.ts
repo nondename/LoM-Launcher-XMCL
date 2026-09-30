@@ -47,11 +47,13 @@ function createLomUpdate() {
     if (initialChecking.value) return 'Проверка обновлений…'
     switch (progress.value.phase) {
       case 'checking': return 'Проверка обновлений…'
-      case 'downloading': return `Обновление… ${percentage.value}%`
+      case 'downloading': return `Загрузка… ${percentage.value}%`
       case 'installing': return 'Установка…'
-      case 'error': return 'Повторить обновление'
+      case 'error': return status.value?.installedVersion ? 'Повторить обновление' : 'Повторить установку'
     }
-    if (status.value?.available) return 'Обновить'
+    if (status.value?.available) {
+      return status.value.installedVersion ? 'Обновить' : 'Установить'
+    }
     return undefined
   })
 
@@ -106,6 +108,8 @@ function createLomUpdate() {
     }
   }
 
+  // Startup and profile changes only check whether an install/update exists.
+  // Downloading starts exclusively from the user's explicit launch-button click.
   watch([path, isBedrock, isLoM], () => {
     status.value = undefined
     progress.value = idleProgress()
