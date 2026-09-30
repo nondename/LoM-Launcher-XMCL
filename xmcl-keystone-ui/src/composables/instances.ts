@@ -138,15 +138,22 @@ export function useInstances() {
     }
 
     try {
-      // A brand-new LoM Launcher should never land on XMCL's generic empty
-      // state. Create the canonical profile before exposing `ready` to the
-      // router, then select it immediately.
+      // A brand-new LoM Launcher creates and selects the canonical profile, but
+      // does not start downloading anything until the user explicitly clicks
+      // Install/Update. Authlib injector is disabled before the first launch.
       if (newVal.instances.length === 0) {
         const createdPath = await createInstance({
           name: LOM_PROFILE_NAME,
           runtime: { ...LOM_PROFILE_RUNTIME },
         })
-        coldStartPendingPath.value = createdPath
+        await editInstance({
+          instancePath: createdPath,
+          disableAuthlibInjector: true,
+        })
+        // Clear the legacy cold-start auto-install marker. The launch button may
+        // still observe this key for older profiles, but new LoM profiles must
+        // wait for an explicit user action before installing files.
+        coldStartPendingPath.value = ''
         _path.value = createdPath
       } else {
         const lastSelectedPath = _path.value
