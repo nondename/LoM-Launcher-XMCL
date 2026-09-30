@@ -217,7 +217,7 @@ function onPlayClick() {
 }
 
 /* Play icon does a single full spin when clicked. */
-.nested-icon.spin {
+.btn-play-inset .nested-icon.spin {
   animation: play-spin 0.45s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
