@@ -47,6 +47,7 @@ export function useLaunchButton() {
     buttonText: lomUpdateButtonText,
     buttonLoading: lomUpdateButtonLoading,
     actionable: lomUpdateActionable,
+    refresh: refreshLomUpdate,
     run: runLomUpdate,
   } = useLomUpdate()
 
@@ -179,6 +180,19 @@ export function useLaunchButton() {
       currentPath !== javaStatus.value?.instance
     )
   })
+
+  async function continueLoMInstall(instancePath: string) {
+    if (path.value !== instancePath || !isLoMProfile(instance.value) || isBedrock.value) return false
+
+    await refreshLomUpdate()
+    if (path.value !== instancePath || !isLoMProfile(instance.value)) return false
+
+    if (lomUpdateStatus.value?.available) {
+      await runLomUpdate(instancePath)
+    }
+
+    return lomUpdateProgress.value.phase === 'done' || lomUpdateStatus.value?.available === false
+  }
 
   const launchButtonFacade = shallowRef<{
     text: string
@@ -354,10 +368,13 @@ export function useLaunchButton() {
           menu: launchMenuItems.value.filter((i) => !i.noDisplay),
           actionName: 'user_action.instance.repair',
           onClick: async (instancePath, action) => {
-            await Promise.allSettled([
+            const repaired = await Promise.allSettled([
               fixVersionIssues(instancePath, action),
               fixInstanceFileIssue(instancePath, action),
             ])
+            if (repaired.every((result) => result.status === 'fulfilled')) {
+              await continueLoMInstall(instancePath)
+            }
           },
         }
       } else if (lomUpdateButtonText.value) {
@@ -415,10 +432,9 @@ export function useLaunchButton() {
   )
 
   // Drive the native XMCL repair/install stage and then the LoM manifest stage
-  // only for the exact profile created by the empty-state cold start. Each
-  // diagnosis signature is attempted automatically once; on a persistent
-  // failure the normal Install/Retry button remains available instead of
-  // creating an unattended retry loop.
+  // only for the exact profile created by the empty-state cold start. The
+  // runtime repair and pack synchronization are deliberately one continuous
+  // install pipeline, so a clean install never stops on a second Install click.
   let coldStartRunning = false
   let lastColdStartAttempt = ''
   async function driveLoMColdStart() {
@@ -434,10 +450,17 @@ export function useLaunchButton() {
       lastColdStartAttempt = attempt
       coldStartRunning = true
       try {
-        await Promise.allSettled([
+        const repaired = await Promise.allSettled([
           fixVersionIssues(instancePath),
           fixInstanceFileIssue(instancePath),
         ])
+        if (repaired.every((result) => result.status === 'fulfilled')) {
+          const ready = await continueLoMInstall(instancePath)
+          if (ready && coldStartPendingPath.value === instancePath) {
+            coldStartPendingPath.value = ''
+            lastColdStartAttempt = ''
+          }
+        }
       } finally {
         coldStartRunning = false
         queueMicrotask(() => { void driveLoMColdStart() })
