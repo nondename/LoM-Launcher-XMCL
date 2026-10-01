@@ -50,6 +50,11 @@ function safePath(root: string, filePath: string) {
   return target
 }
 
+function isUserOwnedSeedPath(filePath: string) {
+  const normalized = filePath.replace(/\\/g, '/').replace(/^\.\/+/, '').toLowerCase()
+  return normalized === 'options.txt'
+}
+
 function abortError() {
   const error = new Error('LoM update cancelled')
   error.name = 'AbortError'
@@ -302,10 +307,20 @@ export class LoMUpdateService extends AbstractService {
         throw new Error(`[LoM Updater] Invalid MD5: ${file.path}`)
       }
 
-      // Files without a published checksum (currently only options.txt) are
-      // refreshed whenever the pack version changes. Hashed text files accept
-      // the Git LF blob when the manifest was generated from an equivalent
-      // Windows CRLF checkout.
+      // User-owned seed files are installed only when missing. Once Minecraft
+      // has created or modified them, the pack updater deliberately stops
+      // owning their contents. This keeps our initial ru_ru default without
+      // resetting GUI scale, keybinds, audio, resource packs, etc.
+      if (isUserOwnedSeedPath(file.path)) {
+        try {
+          await readFile(safePath(instancePath, file.path))
+          this.log(`[LoM Updater] Preserve user-owned file: ${file.path}`)
+          continue
+        } catch { /* missing: seed it below */ }
+      }
+
+      // Hashed text files accept the Git LF blob when the manifest was
+      // generated from an equivalent Windows CRLF checkout.
       if (file.hash && file.hashAlgorithm) {
         try {
           const data = await readFile(safePath(instancePath, file.path))
@@ -442,6 +457,10 @@ export class LoMUpdateService extends AbstractService {
       }
 
       for (const relativePath of manifest.delete ?? []) {
+        if (isUserOwnedSeedPath(relativePath)) {
+          this.log(`[LoM Updater] Preserve user-owned delete target: ${relativePath}`)
+          continue
+        }
         const target = safePath(instancePath, relativePath)
         try {
           await unlink(target)
