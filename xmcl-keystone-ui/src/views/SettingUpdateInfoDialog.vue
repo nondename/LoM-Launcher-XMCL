@@ -92,7 +92,7 @@
       hover
 
       style="width: 100%"
-      to="https://github.com/voxelum/x-minecraft-launcher/releases"
+      to="https://github.com/nondename/LoM-Launcher-XMCL/releases"
       target="browser"
       push
     >
@@ -134,16 +134,15 @@ function renderUpdate() {
 const body = computed(() => state.value?.updateInfo?.operation === 'autoupdater' ? state.value?.updateInfo.body : renderUpdate())
 const env = injection(kEnvironment)
 const isAppX = computed(() => env.value?.env === 'appx')
-const isAppImage = computed(() => env.value?.env === 'appimage')
 const hintRedownload = computed(() =>
   state.value?.updateInfo?.operation === 'manual',
 )
 
 const openOfficialWebsite = () => {
-  window.open('https://xmcl.app', 'browser')
+  window.open('https://github.com/nondename/Minecraft-Legends-of-Medieval', 'browser')
 }
 const openGithub = () => {
-  window.open('https://github.com/voxelum/x-minecraft-launcher/releases', 'browser')
+  window.open('https://github.com/nondename/LoM-Launcher-XMCL/releases', 'browser')
 }
 </script>
 
