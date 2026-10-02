@@ -57,6 +57,19 @@
       @drop.prevent="dropSkin"
       @dragover.prevent="() => {}"
     />
+    <div v-if="hideControls" class="w-full px-3 -mt-2">
+      <v-btn
+        variant="tonal"
+        size="small"
+        block
+        color="secondary"
+        class="rounded-lg font-medium text-xs tracking-normal"
+        @click="isCapeLibraryDialogShown = true"
+      >
+        <v-icon start size="16">flag</v-icon>
+        Гардероб плащей
+      </v-btn>
+    </div>
     <div v-if="!hideControls" class="absolute bottom-4 flex flex-none flex-shrink gap-4">
       <v-fab-transition>
         <v-btn
@@ -257,19 +270,3 @@ const save_ = async () => {
 .my-slider-x-transition-leave-to {
   transform: translateX(100%);
 }
-
-.skin-model-toggle {
-  background: rgba(var(--v-theme-on-surface), 0.08) !important;
-  backdrop-filter: blur(8px);
-  border: 1px solid rgba(var(--v-theme-on-surface), 0.1) !important;
-}
-
-.skin-model-toggle .v-btn {
-  color: rgba(var(--v-theme-on-surface), 0.5) !important;
-}
-
-.skin-model-toggle .v-btn--active {
-  color: rgb(var(--v-theme-on-surface)) !important;
-  background: rgba(var(--v-theme-on-surface), 0.12) !important;
-}
-</style>
