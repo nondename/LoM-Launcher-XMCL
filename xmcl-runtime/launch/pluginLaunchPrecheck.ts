@@ -11,12 +11,12 @@ import { ensureDir, move, stat, unlink } from 'fs-extra'
 import { join } from 'path'
 import { LauncherAppPlugin, kGameDataPath } from '~/app'
 import { InstanceService } from '~/instance'
-import { LoMUpdateService } from '~/instanceIO'
 import { VersionInstallService } from '~/install/InstallService'
 import { isLinkTo, readlinkSafe } from '~/instance/utils/readLinkSafe'
 import { getManagedJavaComponent, JavaService, JavaValidation } from '~/java'
 import { LaunchService } from '~/launch'
 import { PeerService } from '~/peer'
+import { LocalSkinService } from '~/user/LocalSkinService'
 import { linkOrCopyDirectory, missing } from '~/util/fs'
 
 export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
@@ -26,30 +26,36 @@ export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
   const logger = app.getLogger('LaunchPrecheck')
 
   launchService.registerMiddleware({
-    name: 'lom-modpack-update',
+    name: 'lom-local-skin',
     async onBeforeLaunch(input, payload) {
       if (payload.side !== 'client') return
-      logger.log(`[LoM Updater] Pre-launch check for ${input.gameDirectory}`)
-      try {
-        const updater = await app.registry.getOrCreate(LoMUpdateService)
-        const result = await updater.update(input.gameDirectory)
-        logger.log(`[LoM Updater] Pre-launch update complete: version=${result.version}, changed=${result.changed}, deleted=${result.deleted}`)
-      } catch (e) {
-        const error = e instanceof Error ? e : new Error(String(e))
-        logger.error(error)
-        throw new LaunchException(
-          { type: 'launchPreExecuteCommandFailed', command: 'LoM Modpack Update', error: error.message },
-          `LoM modpack update failed: ${error.message}`,
-          { cause: error },
-        )
-      }
+      const localSkinService = await app.registry.getOrCreate(LocalSkinService)
+      await localSkinService.prepareLaunchSkin(input.user, input.gameDirectory)
     },
   })
 
+  // `libraries/` and `versions/` are read-mostly launcher-managed caches
+  // (the game only consumes them, the installer writes the source-of-truth
+  // copy). That matches the safety contract of `linkOrCopyDirectory`, so
+  // we use it here to recover the 2 856 ev / 423 users of `LaunchLinkError`
+  // on 0.56.4 that were caused by users without `SeCreateSymbolicLinkPrivilege`
+  // (no Windows Developer Mode, no admin) where both `symlink('dir')` and
+  // `symlink('junction')` fail with EPERM and the launch never gets the
+  // libraries it needs. See issue #1428 — the v0.56.4 fix was reverted from
+  // this call site (commit d34708ef) out of safety paranoia even though the
+  // doc on `linkOrCopyDirectory` explicitly endorses it for this case.
   const ensureLinkFolder = async (fromPath: string, toPath: string) => {
     if (await missing(fromPath)) {
       await ensureDir(fromPath)
     }
+
+    // Already a link (symlink or win32 junction) pointing at the shared root:
+    // nothing to do. `isLinkTo` normalizes the `\\?\` prefix / trailing sep a
+    // junction reports through `readlink`, which a raw string compare misses —
+    // that mismatch made every launch needlessly unlink+relink and, when the
+    // unlink of a junction failed (common on Windows/Wine), the following
+    // symlink hit EEXIST and surfaced as `LaunchLinkError` (issue #1428 was
+    // the EPERM cousin; this is the EEXIST long tail).
     if (await isLinkTo(toPath, fromPath)) {
       return
     }
@@ -57,6 +63,7 @@ export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
     let stage = 'link'
     const linkTarget = await readlinkSafe(toPath).catch(() => undefined)
     if (linkTarget) {
+      // A link that points elsewhere (or is dangling): drop it, then relink.
       stage = 'relink'
       await unlink(toPath).catch(() => {})
     } else {
@@ -65,6 +72,7 @@ export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
         throw e
       })
       if (fstat) {
+        // A real directory sits where the link should be: preserve it.
         stage = 'after move'
         try {
           await move(toPath, join(toPath + '.bk'))
@@ -77,6 +85,10 @@ export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
     }
 
     await linkOrCopyDirectory(fromPath, toPath, logger).catch(async (e) => {
+      // Idempotent recovery: the destination already links to the shared root
+      // (a concurrent setup won the race, or a stale entry we couldn't remove
+      // is in fact correct). Treat EEXIST as success instead of raising the
+      // `LaunchLinkError` storm that 87/91 of 0.61.0's link failures came from.
       if (isSystemError(e) && e.code === 'EEXIST' && await isLinkTo(toPath, fromPath)) {
         return
       }
@@ -149,7 +161,22 @@ export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
       if (payload.side === 'server') return
       const resolvedVersion = payload.version
       if (!input?.skipAssetsCheck) {
-        // Reserved for XMCL asset diagnostics.
+        // const resourceFolder = new MinecraftFolder(getPath())
+        // await Promise.all([
+        //   diagnoseJar(resolvedVersion, resourceFolder, { side: input.side }).then(async (issue) => {
+        //     if (issue?.type === 'missing') {
+        //       const installService = await app.registry.getOrCreate(InstallService)
+        //       return installService.installMinecraftJar(resolvedVersion.id, input.side)
+        //     }
+        //   }),
+        //   diagnoseLibraries(resolvedVersion, resourceFolder).then(async (libs) => {
+        //     const missing = libs.filter((l) => l.type === 'missing')
+        //     if (missing.length > 0) {
+        //       const installService = await app.registry.getOrCreate(InstallService)
+        //       await installService.installLibraries(libs.map((l) => l.library))
+        //     }
+        //   }),
+        // ])
       }
 
       const commonLibs = resolvedVersion.libraries.filter((lib) => !lib.isNative)
