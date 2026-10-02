@@ -57,19 +57,6 @@
       @drop.prevent="dropSkin"
       @dragover.prevent="() => {}"
     />
-    <div v-if="hideControls" class="w-full px-3 -mt-2">
-      <v-btn
-        variant="tonal"
-        size="small"
-        block
-        color="secondary"
-        class="rounded-lg font-medium text-xs tracking-normal"
-        @click="isCapeLibraryDialogShown = true"
-      >
-        <v-icon start size="16">flag</v-icon>
-        Гардероб плащей
-      </v-btn>
-    </div>
     <div v-if="!hideControls" class="absolute bottom-4 flex flex-none flex-shrink gap-4">
       <v-fab-transition>
         <v-btn
@@ -89,7 +76,6 @@
         :has-cape="canUploadCape"
         :disabled="pending"
         :open-library="() => (isSkinLibraryDialogShown = true)"
-        :open-cape-library="() => (isCapeLibraryDialogShown = true)"
         :upload="() => (isImportSkinDialogShown = true)"
         :save="exportSkin"
         :load="loadSkin"
@@ -109,8 +95,8 @@
     <v-dialog v-model="isImportSkinDialogShown" width="400">
       <ImportSkinUrlForm @input="skin = $event" />
     </v-dialog>
-    <UserCapeLibraryDialog
-      v-model="isCapeLibraryDialogShown"
+    <UserSkinLibraryDialog
+      v-model="isSkinLibraryDialogShown"
       :user="user"
       :profile="profile"
     />
@@ -119,7 +105,7 @@
 
 <script lang="ts" setup>
 import SkinView from '@/components/SkinView.vue'
-import UserCapeLibraryDialog from '@/components/UserCapeLibraryDialog.vue'
+import UserSkinLibraryDialog from '@/components/UserSkinLibraryDialog.vue'
 import { getDropFilePaths } from '@/composables/dropHandler'
 import { vSharedTooltip } from '@/directives/sharedTooltip'
 import { GameProfileAndTexture, UserProfile } from '@xmcl/runtime-api'
@@ -185,7 +171,6 @@ const slimToggle = computed({
 const { showOpenDialog, showSaveDialog } = windowController
 const isImportSkinDialogShown = ref(false)
 const isSkinLibraryDialogShown = ref(false)
-const isCapeLibraryDialogShown = ref(false)
 
 const onModelChange = (modelType: 'default' | 'slim') => {
   if (inferModelType.value) {
