@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - 'fix/**'
+      - 'feature/in-app-launcher-update'
   workflow_dispatch:
 
 jobs:
