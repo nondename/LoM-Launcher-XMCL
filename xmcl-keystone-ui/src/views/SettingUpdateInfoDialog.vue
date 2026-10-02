@@ -34,6 +34,16 @@
       >
         {{ t('setting.maunalUpdateHint') }}
       </v-alert>
+      <v-alert
+        v-if="actionError"
+        variant="tonal"
+        type="error"
+        class="mx-4 mb-2"
+        closable
+        @click:close="actionError = ''"
+      >
+        {{ actionError }}
+      </v-alert>
       <v-card-actions>
         <v-btn
           @click="openProject()"
@@ -60,7 +70,7 @@
             color="primary"
             :loading="downloadingUpdate"
             :disabled="downloadingUpdate"
-            @click="downloadUpdate()"
+            @click="handleDownloadUpdate()"
             variant="text"
           >
             <v-icon start>
@@ -72,7 +82,8 @@
             v-else
             color="primary"
             :loading="installing"
-            @click="quitAndInstall()"
+            :disabled="installing"
+            @click="handleInstallUpdate()"
           >
             <v-icon start>
               refresh
@@ -119,12 +130,40 @@ const {
   installing, downloadingUpdate, checkingUpdate, updateInfo, updateStatus,
   downloadUpdate, quitAndInstall,
 } = injection(kUpdateSettings)
+const actionError = ref('')
 
 function renderUpdate() {
   const updateBody = state.value?.updateInfo?.body ?? ''
   const transformed = updateBody.replace(/## \[(.+)\]\(#.+\)/g, (str, v) => `## ${v}`)
   return render(transformed)
 }
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === 'object' && 'message' in error) {
+    return String((error as { message?: unknown }).message ?? error)
+  }
+  return String(error)
+}
+
+async function handleDownloadUpdate() {
+  actionError.value = ''
+  try {
+    await downloadUpdate()
+  } catch (error) {
+    actionError.value = getErrorMessage(error)
+  }
+}
+
+async function handleInstallUpdate() {
+  actionError.value = ''
+  try {
+    await quitAndInstall()
+  } catch (error) {
+    actionError.value = getErrorMessage(error)
+  }
+}
+
 const body = computed(() => state.value?.updateInfo?.operation === 'autoupdater' ? state.value?.updateInfo.body : renderUpdate())
 const env = injection(kEnvironment)
 const isAppX = computed(() => env.value?.env === 'appx')
