@@ -1,375 +1,293 @@
 <template>
   <v-dialog
     :model-value="modelValue"
-    max-width="1040"
+    max-width="1180"
     content-class="elevation-0"
     @update:model-value="$emit('update:modelValue', $event)"
   >
-    <v-card class="skin-library-dialog rounded-2xl flex flex-row h-[680px] overflow-hidden border border-[rgba(var(--v-theme-on-surface),0.1)]">
-      <!-- Left Panel: 3D Preview & Actions -->
-      <div class="w-[330px] flex-shrink-0 flex flex-col items-center justify-between p-6 border-r border-[rgba(var(--v-theme-on-surface),0.08)] bg-black/25">
-        <!-- Top Info Header -->
-        <div class="w-full flex items-center justify-between">
-          <div class="text-xs font-bold uppercase tracking-wider opacity-60">
-            {{ t('userSkin.preview') }}
-          </div>
-          <v-chip
-            size="small"
-            :color="previewSlim ? 'purple' : 'blue'"
-            variant="tonal"
-            class="font-medium"
-          >
-            {{ previewSlim ? t('userSkin.slim') : t('userSkin.classic') }}
-          </v-chip>
-        </div>
-
-        <!-- 3D Skin Viewer -->
-        <div class="w-full flex-1 flex items-center justify-center my-2 relative">
+    <v-card class="wardrobe-dialog rounded-2xl flex flex-row h-[700px] overflow-hidden border border-[rgba(var(--v-theme-on-surface),0.1)]">
+      <!-- Shared 3D preview: always shows the actually equipped skin + cape. -->
+      <div class="w-[360px] flex-shrink-0 flex flex-col items-center justify-between p-5 border-r border-[rgba(var(--v-theme-on-surface),0.08)] bg-black/25">
+        <div class="w-full flex-1 min-h-0 flex items-center justify-center wardrobe-preview">
           <SkinView
-            v-if="modelValue && previewUrl"
+            v-if="modelValue"
             :paused="false"
-            :height="330"
-            :skin="previewUrl"
-            :slim="previewSlim"
-            :cape="currentCape"
+            :width="300"
+            :height="500"
+            :skin="equippedSkinUrl"
+            :slim="equippedSkinSlim"
+            :cape="equippedCapeUrl"
             :name="''"
+            :rotation-y="activeTab === 'capes' ? capePreviewRotation : 0"
             animation="idle"
-            @model="onModelDetected"
-            @error="onSkinLoadError"
           />
-          <div v-else class="flex flex-col items-center gap-3 text-center opacity-40">
-            <v-icon size="56">person</v-icon>
-            <span class="text-sm font-medium">{{ t('userSkin.previewPlaceholder') }}</span>
-          </div>
         </div>
 
-        <!-- Selected Skin Title & Controls -->
-        <div class="w-full flex flex-col gap-3">
-          <div class="text-center">
-            <div class="text-base font-bold truncate px-2" :title="previewName">
-              {{ previewName || t('userSkin.noSkinSelected') }}
-            </div>
-          </div>
-
-          <!-- Action Buttons -->
-          <div class="flex flex-col gap-2.5">
-            <v-btn
-              :color="isCurrentlyEquipped ? 'success' : 'primary'"
-              :variant="isCurrentlyEquipped ? 'tonal' : 'elevated'"
-              size="large"
-              block
-              class="font-semibold"
-              :disabled="isEditorOpen || !selectedSkin || isCurrentlyEquipped || isUploading || !canUploadSkin"
-              :loading="isUploading"
-              @click="equipSelectedSkin()"
-            >
-              <v-icon start>{{ isCurrentlyEquipped ? 'check_circle' : 'check' }}</v-icon>
-              {{ isCurrentlyEquipped ? t('userSkin.equipped') : t('userSkin.equipToAccount') }}
-            </v-btn>
-
-            <div class="flex items-center gap-2">
-              <v-btn
-                variant="tonal"
-                size="default"
-                class="flex-1"
-                height="40"
-                :disabled="isEditorOpen || !canSaveCurrentToLibrary"
-                @click="saveCurrentToLibrary"
-              >
-                <v-icon start size="16">bookmark_add</v-icon>
-                {{ t('userSkin.saveCurrent') }}
-              </v-btn>
-
-              <v-btn
-                variant="tonal"
-                size="default"
-                icon
-                width="40"
-                height="40"
-                :title="t('userSkin.saveTitle')"
-                :disabled="isEditorOpen || !selectedSkin"
-                @click="exportSelectedSkin"
-              >
-                <v-icon size="18">download</v-icon>
-              </v-btn>
-            </div>
-          </div>
+        <div class="w-full flex items-center gap-2">
+          <v-btn
+            variant="tonal"
+            size="large"
+            block
+            class="font-semibold flex-1"
+            :disabled="activeTab === 'skins' ? !canSaveCurrentSkinToLibrary : !equippedCapeUrl"
+            @click="activeTab === 'skins' ? saveCurrentSkinToLibrary() : saveCurrentCapeToLibrary()"
+          >
+            <v-icon start size="18">bookmark_add</v-icon>
+            {{ activeTab === 'skins' ? 'Сохранить текущий скин' : 'Сохранить текущий плащ' }}
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            size="large"
+            icon
+            :disabled="activeTab === 'skins' ? !selectedSkin : !selectedCape"
+            @click="activeTab === 'skins' ? exportSelectedSkin() : exportSelectedCape()"
+          >
+            <v-icon>download</v-icon>
+          </v-btn>
         </div>
       </div>
 
-      <!-- Right Panel -->
+      <!-- Right side -->
       <div class="flex-1 flex flex-col p-6 overflow-hidden bg-surface">
-        <template v-if="isEditorOpen">
-          <div class="flex items-center justify-between gap-3 mb-5">
-            <div class="flex items-center gap-3 min-w-0">
-              <v-btn icon size="small" variant="text" @click="closeEditor">
-                <v-icon>arrow_back</v-icon>
-              </v-btn>
-              <div class="min-w-0">
-                <h2 class="text-xl font-bold truncate">
-                  {{ editingSkin ? t('userSkin.editSkin') : t('userSkin.addNewSkin') }}
-                </h2>
-                <div class="text-xs opacity-50 mt-0.5">
-                  {{ t('userSkin.librarySubtitle') }}
-                </div>
-              </div>
+        <div class="flex items-start justify-between gap-4 mb-5 flex-none">
+          <div class="min-w-0">
+            <h2 class="text-xl font-bold flex items-center gap-2">
+              <v-icon color="primary" size="24">accessibility</v-icon>
+              Локальный гардероб
+            </h2>
+            <div class="text-xs opacity-50 mt-0.5">
+              Выбирайте, упорядочивайте и храните свои скины и плащи локально
             </div>
+          </div>
 
+          <div class="flex items-center gap-2">
+            <v-btn-toggle
+              v-if="!editorOpen"
+              v-model="activeTab"
+              mandatory
+              color="primary"
+              density="comfortable"
+              rounded="lg"
+              class="wardrobe-tabs"
+            >
+              <v-btn value="skins" class="px-5 font-semibold">
+                <v-icon start size="18">checkroom</v-icon>
+                Скины
+              </v-btn>
+              <v-btn value="capes" class="px-5 font-semibold">
+                <v-icon start size="18">flag</v-icon>
+                Плащи
+              </v-btn>
+            </v-btn-toggle>
             <v-btn icon size="small" variant="text" @click="$emit('update:modelValue', false)">
               <v-icon>close</v-icon>
             </v-btn>
           </div>
+        </div>
 
-          <div v-if="loadSkinError" class="mb-4 flex-none">
-            <v-alert
-              type="error"
-              variant="tonal"
-              density="compact"
-              closable
-              @click:close="loadSkinError = ''"
-            >
-              {{ loadSkinError }}
-            </v-alert>
+        <v-alert
+          v-if="errorMessage"
+          type="error"
+          variant="tonal"
+          density="compact"
+          closable
+          class="mb-4 flex-none"
+          @click:close="errorMessage = ''"
+        >
+          {{ errorMessage }}
+        </v-alert>
+
+        <!-- Editors -->
+        <template v-if="editorOpen">
+          <div class="flex items-center gap-3 mb-5 flex-none">
+            <v-btn icon size="small" variant="text" @click="closeEditor">
+              <v-icon>arrow_back</v-icon>
+            </v-btn>
+            <div>
+              <div class="text-xl font-bold">
+                {{ activeTab === 'skins'
+                  ? (editingSkin ? 'Изменить скин' : 'Новый скин')
+                  : (editingCape ? 'Изменить плащ' : 'Новый плащ') }}
+              </div>
+              <div class="text-xs opacity-50 mt-0.5">
+                {{ activeTab === 'skins' ? 'PNG скин Minecraft' : 'PNG плащ Minecraft' }}
+              </div>
+            </div>
           </div>
 
           <div class="flex-1 min-h-0 flex flex-col justify-between">
-            <div class="flex flex-col gap-5 overflow-y-auto pr-1">
+            <div class="overflow-y-auto pr-1 flex flex-col gap-5">
               <div>
-                <div class="text-xs font-bold uppercase opacity-70 mb-2">
-                  {{ t('userSkin.skinName') }}
-                </div>
+                <div class="text-xs font-bold uppercase opacity-70 mb-2">Название</div>
                 <v-text-field
                   v-model="draftName"
-                  :placeholder="t('userSkin.skinNamePlaceholder')"
+                  :placeholder="activeTab === 'skins' ? 'Мой скин' : 'Мой плащ'"
                   variant="outlined"
                   density="comfortable"
                   hide-details
                 />
               </div>
 
-              <div>
+              <div v-if="activeTab === 'skins'">
                 <v-btn-toggle
                   v-model="draftSlim"
                   mandatory
                   density="comfortable"
-                  class="w-full surface-panel"
+                  class="w-full"
                   rounded="lg"
                 >
-                  <v-btn :value="false" class="flex-1 font-semibold">
-                    <v-icon size="18" class="mr-2">accessibility_new</v-icon>
-                    {{ t('userSkin.classic') }}
-                  </v-btn>
-                  <v-btn :value="true" class="flex-1 font-semibold">
-                    <v-icon size="18" class="mr-2">accessibility</v-icon>
-                    {{ t('userSkin.slim') }}
-                  </v-btn>
+                  <v-btn :value="false" class="flex-1 font-semibold">Classic</v-btn>
+                  <v-btn :value="true" class="flex-1 font-semibold">Slim</v-btn>
                 </v-btn-toggle>
               </div>
 
-              <div v-if="!editingSkin">
-                <v-tabs v-model="importTab" density="compact" color="primary" class="mb-3">
-                  <v-tab value="file" class="font-semibold text-sm">
-                    <v-icon size="19" class="mr-2">folder_open</v-icon>
-                    {{ t('userSkin.localFile') }}
-                  </v-tab>
-                  <v-tab value="url" class="font-semibold text-sm">
-                    <v-icon size="19" class="mr-2">link</v-icon>
-                    {{ t('userSkin.urlOrPlayer') }}
-                  </v-tab>
-                </v-tabs>
-
-                <v-window v-model="importTab">
-                  <v-window-item value="file">
-                    <div
-                      class="file-drop-zone min-h-[205px] border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-200 hover:border-primary hover:bg-primary/5"
-                      :class="draftUrl ? 'border-primary/60 bg-primary/5' : 'border-[rgba(var(--v-theme-on-surface),0.15)]'"
-                      @click="pickFile"
-                      @drop.prevent="onDropFile"
-                      @dragover.prevent
-                    >
-                      <v-icon size="46" color="primary" class="mb-3">upload_file</v-icon>
-                      <div class="text-base font-bold">{{ t('userSkin.dropFileHere') }}</div>
-                      <div class="text-xs opacity-50 mt-1.5">{{ t('userSkin.supportedFormats') }}</div>
-                    </div>
-                  </v-window-item>
-
-                  <v-window-item value="url">
-                    <div class="min-h-[205px] flex flex-col justify-center gap-3">
-                      <v-select
-                        v-model="selectedAuthority"
-                        :items="authorityItems"
-                        item-title="title"
-                        item-value="value"
-                        variant="outlined"
-                        density="comfortable"
-                        hide-details
-                        class="w-full flex-grow-0"
-                      >
-                        <template #selection="{ item }">
-                          <div class="flex items-center gap-2 min-w-0">
-                            <v-avatar v-if="item.icon" :image="item.icon" size="20" />
-                            <v-icon v-else size="20">public</v-icon>
-                            <span class="truncate">{{ item.title }}</span>
-                          </div>
-                        </template>
-                        <template #item="{ props: itemProps, item }">
-                          <v-list-item v-bind="itemProps">
-                            <template #prepend>
-                              <v-avatar v-if="item.icon" :image="item.icon" size="22" />
-                              <v-icon v-else size="22">public</v-icon>
-                            </template>
-                          </v-list-item>
-                        </template>
-                      </v-select>
-                      <div class="flex gap-2.5 items-center">
-                        <v-text-field
-                          v-model="urlInput"
-                          :placeholder="t('userSkin.urlOrPlayerPlaceholder')"
-                          variant="outlined"
-                          density="comfortable"
-                          hide-details
-                          class="flex-1"
-                          :loading="isFetchingUrl"
-                          @keydown.enter.prevent="fetchFromUrl"
-                        />
-                        <v-btn
-                          color="primary"
-                          variant="tonal"
-                          height="48"
-                          class="px-5 font-semibold flex-shrink-0"
-                          :loading="isFetchingUrl"
-                          :disabled="!urlInput"
-                          @click="fetchFromUrl"
-                        >
-                          <v-icon start size="18">download</v-icon>
-                          {{ t('userSkin.fetch') }}
-                        </v-btn>
-                      </div>
-                    </div>
-                  </v-window-item>
-                </v-window>
+              <div v-if="!editingSkin && !editingCape">
+                <div
+                  class="file-drop-zone min-h-[235px] border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-200 hover:border-primary hover:bg-primary/5"
+                  :class="draftUrl ? 'border-primary/60 bg-primary/5' : 'border-[rgba(var(--v-theme-on-surface),0.15)]'"
+                  @click="pickFile"
+                  @drop.prevent="onDropFile"
+                  @dragover.prevent
+                >
+                  <v-icon size="48" color="primary" class="mb-3">upload_file</v-icon>
+                  <div class="text-base font-bold">
+                    {{ activeTab === 'skins' ? 'Выбрать PNG скина' : 'Выбрать PNG плаща' }}
+                  </div>
+                  <div class="text-xs opacity-50 mt-1.5">
+                    {{ activeTab === 'skins' ? 'Поддерживаются стандартные PNG-скины Minecraft' : 'Рекомендуемый формат плаща: 64×32 PNG' }}
+                  </div>
+                  <div v-if="draftUrl" class="text-xs text-primary mt-4">Файл выбран</div>
+                </div>
               </div>
             </div>
 
             <div class="flex items-center justify-end gap-3 mt-5 pt-5 border-t border-[rgba(var(--v-theme-on-surface),0.08)]">
-              <v-btn variant="text" class="px-5" @click="closeEditor">
-                {{ t('shared.cancel') }}
+              <v-btn variant="text" @click="closeEditor">Отмена</v-btn>
+              <v-btn color="primary" :disabled="!canSaveDraft" @click="saveDraft(false)">
+                {{ editingSkin || editingCape ? 'Сохранить' : 'Сохранить в гардеробе' }}
               </v-btn>
               <v-btn
-                color="primary"
-                class="px-6 font-semibold"
-                :disabled="!canSaveDraft"
-                @click="saveDraft(false)"
-              >
-                {{ editingSkin ? t('shared.save') : t('userSkin.saveToLibrary') }}
-              </v-btn>
-              <v-btn
-                v-if="!editingSkin"
+                v-if="!editingSkin && !editingCape"
                 color="success"
-                class="px-6 font-semibold"
                 :disabled="!canSaveDraft"
                 @click="saveDraft(true)"
               >
-                {{ t('userSkin.saveAndEquip') }}
+                Сохранить и надеть
               </v-btn>
             </div>
           </div>
         </template>
 
+        <!-- Library -->
         <template v-else>
-        <!-- Top Toolbar -->
-        <div class="flex items-center justify-between gap-3 mb-5">
-          <div>
-            <h2 class="text-xl font-bold flex items-center gap-2">
-              <v-icon color="primary" size="24">accessibility</v-icon>
-              {{ t('userSkin.libraryTitle') }}
-            </h2>
-            <div class="text-xs opacity-50 mt-0.5">
-              {{ t('userSkin.librarySubtitle') }}
+          <div class="flex items-center justify-between gap-3 mb-4 flex-none">
+            <v-text-field
+              v-model="searchQuery"
+              :placeholder="activeTab === 'skins' ? 'Поиск скинов' : 'Поиск плащей'"
+              prepend-inner-icon="search"
+              variant="outlined"
+              density="compact"
+              hide-details
+              clearable
+              class="max-w-[360px]"
+            />
+            <v-btn color="primary" class="font-medium" @click="openAddEditor">
+              <v-icon start size="18">add</v-icon>
+              {{ activeTab === 'skins' ? 'Новый скин' : 'Новый плащ' }}
+            </v-btn>
+          </div>
+
+          <!-- Skins -->
+          <div v-if="activeTab === 'skins'" class="flex-1 overflow-y-auto pr-1">
+            <div class="grid grid-cols-4 gap-3">
+              <!-- Built-in zero skin. It cannot be edited or deleted. -->
+              <div
+                class="default-card relative flex flex-col items-center rounded-xl cursor-pointer overflow-hidden"
+                :class="isDefaultSkinEquipped ? 'is-equipped selected' : ''"
+                @click="equipDefaultSkin"
+              >
+                <div class="relative w-full flex items-center justify-center py-5 px-3 min-h-[140px]">
+                  <PlayerSkin2D :src="steveSkin" :slim="false" :width="56" :height="112" />
+                  <v-chip size="x-small" variant="tonal" class="absolute top-2 right-2">Встроенный</v-chip>
+                  <v-chip v-if="isDefaultSkinEquipped" size="x-small" color="success" class="absolute top-2 left-2">
+                    <v-icon start size="12">check</v-icon>Надет
+                  </v-chip>
+                </div>
+                <div class="w-full px-2.5 py-2 text-center text-[11px] font-semibold">Steve</div>
+              </div>
+
+              <UserSkinCard
+                v-for="item in filteredSkins"
+                :key="item.id"
+                :skin="item"
+                :is-selected="selectedSkin?.id === item.id"
+                :is-equipped="isSkinEquipped(item)"
+                @select="selectedSkin = item"
+                @equip="equipSkin"
+                @edit="editSkin"
+                @delete="deleteSkin"
+              />
             </div>
           </div>
 
-          <div class="flex items-center gap-2">
-            <v-btn
-              color="primary"
-              size="default"
-              class="font-medium"
-              @click="openAddEditor"
-            >
-              <v-icon start size="18">add</v-icon>
-              {{ t('userSkin.newSkin') }}
-            </v-btn>
+          <!-- Capes -->
+          <div v-else class="flex-1 overflow-y-auto pr-1">
+            <div class="grid grid-cols-4 gap-3">
+              <!-- Built-in zero cape. -->
+              <div
+                class="cape-card relative rounded-xl border p-3 cursor-pointer transition-colors"
+                :class="isNoCapeEquipped ? 'border-success bg-success/5' : 'border-[rgba(var(--v-theme-on-surface),0.12)]'"
+                @click="unequipCape"
+              >
+                <div class="h-[150px] flex items-center justify-center">
+                  <SkinView
+                    :width="105"
+                    :height="150"
+                    :skin="equippedSkinUrl"
+                    :slim="equippedSkinSlim"
+                    :name="''"
+                    :rotation-y="capePreviewRotation"
+                    animation="none"
+                  />
+                </div>
+                <v-chip size="x-small" variant="tonal" class="absolute top-2 right-2">Встроенный</v-chip>
+                <v-chip v-if="isNoCapeEquipped" size="x-small" color="success" class="absolute top-2 left-2">
+                  <v-icon start size="12">check</v-icon>Надет
+                </v-chip>
+                <div class="font-semibold text-sm truncate text-center mt-2">Без плаща</div>
+              </div>
 
-            <v-btn
-              icon
-              size="small"
-              variant="text"
-              @click="$emit('update:modelValue', false)"
-            >
-              <v-icon>close</v-icon>
-            </v-btn>
+              <div
+                v-for="capeItem in filteredCapes"
+                :key="capeItem.id"
+                class="cape-card relative rounded-xl border p-3 cursor-pointer transition-colors group"
+                :class="selectedCape?.id === capeItem.id || isCapeEquipped(capeItem) ? 'border-primary bg-primary/5' : 'border-[rgba(var(--v-theme-on-surface),0.12)]'"
+                @click="selectedCape = capeItem"
+              >
+                <div class="h-[150px] flex items-center justify-center overflow-hidden">
+                  <SkinView
+                    :width="105"
+                    :height="150"
+                    :skin="equippedSkinUrl"
+                    :slim="equippedSkinSlim"
+                    :cape="capeItem.url"
+                    :name="''"
+                    :rotation-y="capePreviewRotation"
+                    animation="none"
+                  />
+                </div>
+                <v-chip v-if="isCapeEquipped(capeItem)" size="x-small" color="success" class="absolute top-2 left-2">
+                  <v-icon start size="12">check</v-icon>Надет
+                </v-chip>
+                <div class="font-semibold text-sm truncate text-center mt-2" :title="capeItem.name">{{ capeItem.name }}</div>
+                <div class="cape-actions flex justify-center gap-1 mt-2">
+                  <v-btn v-if="!isCapeEquipped(capeItem)" icon="check" size="x-small" color="success" variant="flat" @click.stop="equipCape(capeItem)" />
+                  <v-btn icon="edit" size="x-small" variant="flat" color="surface" @click.stop="editCape(capeItem)" />
+                  <v-btn icon="delete" size="x-small" variant="flat" color="error" @click.stop="deleteCape(capeItem)" />
+                </div>
+              </div>
+            </div>
           </div>
-        </div>
-
-        <div v-if="loadSkinError" class="mb-4 flex-none">
-          <v-alert
-            type="error"
-            variant="tonal"
-            density="compact"
-            closable
-            @click:close="loadSkinError = ''"
-          >
-            {{ loadSkinError }}
-          </v-alert>
-        </div>
-
-        <!-- Filter and Search Row -->
-        <div class="flex items-center justify-between gap-3 mb-4">
-          <v-text-field
-            v-model="searchQuery"
-            :placeholder="t('shared.search')"
-            prepend-inner-icon="search"
-            variant="outlined"
-            density="compact"
-            hide-details
-            clearable
-            class="max-w-[280px]"
-          />
-
-          <div class="text-xs opacity-60 font-medium px-2 py-1 rounded-md bg-[rgba(var(--v-theme-on-surface),0.05)]">
-            {{ customSkins.length }} {{ t('userSkin.savedCount') }}
-          </div>
-        </div>
-
-        <!-- Skins Grid (Scrollable) -->
-        <div class="flex-1 overflow-y-auto pr-1">
-          <div
-            v-if="filteredSkins.length > 0"
-            class="grid grid-cols-4 gap-3"
-          >
-            <UserSkinCard
-              v-for="item in filteredSkins"
-              :key="item.id"
-              :skin="item"
-              :is-selected="selectedSkin?.id === item.id"
-              :is-equipped="isItemEquipped(item)"
-              @select="selectedSkin = item"
-              @equip="onEquipItem"
-              @edit="onEditItem"
-              @delete="onDeleteItem"
-            />
-          </div>
-
-          <!-- Empty State -->
-          <div
-            v-else
-            class="w-full h-full flex flex-col items-center justify-center text-center opacity-50 py-16"
-          >
-            <v-icon size="56" class="mb-3">face</v-icon>
-            <div class="text-base font-semibold">{{ t('userSkin.noSkinsFound') }}</div>
-            <div class="text-xs opacity-60 mt-1 max-w-[280px]">{{ t('userSkin.tryAddingOne') }}</div>
-          </div>
-        </div>
         </template>
       </div>
     </v-card>
@@ -377,15 +295,16 @@
 </template>
 
 <script lang="ts" setup>
+import PlayerSkin2D from '@/components/PlayerSkin2D.vue'
 import SkinView from '@/components/SkinView.vue'
-import UserSkinCard from '@/components/UserSkinCard.vue'
+import steveSkin from '@/assets/steve_skin.png'
 import { getDropFilePaths } from '@/composables/dropHandler'
 import { useLocaleError } from '@/composables/error'
 import { useNotifier } from '@/composables/notifier'
-import { useService } from '@/composables/service'
-import { SkinLibraryItem, useUserSkinLibrary } from '@/composables/userSkinLibrary'
+import { type SkinLibraryItem, useUserSkinLibrary } from '@/composables/userSkinLibrary'
+import { type CapeLibraryItem, useUserCapeLibrary } from '@/composables/userCapeLibrary'
 import { UserSkinModel } from '@/composables/userSkin'
-import { AUTHORITY_MICROSOFT, AuthorityMetadata, GameProfileAndTexture, UserProfile, UserServiceKey } from '@xmcl/runtime-api'
+import type { GameProfileAndTexture, UserProfile } from '@xmcl/runtime-api'
 
 const props = defineProps<{
   modelValue: boolean
@@ -393,371 +312,332 @@ const props = defineProps<{
   profile: GameProfileAndTexture
 }>()
 
-const emit = defineEmits<{
+defineEmits<{
   (e: 'update:modelValue', value: boolean): void
 }>()
 
-const { t } = useI18n()
 const { notify } = useNotifier()
 const toLocaleError = useLocaleError()
-const { customSkins, allSkins, equippedSkinIds, refresh, addSkin, removeSkin, updateSkin, setEquippedSkin, fetchSkinFromUsername } = useUserSkinLibrary()
-const { showOpenDialog } = windowController
-const { getSupportedAuthorityMetadata } = useService(UserServiceKey)
-
+const { showOpenDialog, showSaveDialog } = windowController
 const skinModel = inject(UserSkinModel)
-const canUploadSkin = computed(() => skinModel?.canUploadSkin.value ?? false)
 
+const {
+  customSkins,
+  allSkins,
+  equippedSkinIds,
+  refresh: refreshSkins,
+  addSkin,
+  removeSkin,
+  updateSkin,
+  setEquippedSkin,
+} = useUserSkinLibrary()
+const {
+  capes,
+  equippedCapeIds,
+  refresh: refreshCapes,
+  addCape,
+  updateCape,
+  removeCape,
+  setEquippedCape,
+} = useUserCapeLibrary()
+
+const activeTab = ref<'skins' | 'capes'>('skins')
 const searchQuery = ref('')
 const selectedSkin = ref<SkinLibraryItem | null>(null)
-const isEditorOpen = ref(false)
+const selectedCape = ref<CapeLibraryItem | null>(null)
+const editorOpen = ref(false)
 const editingSkin = ref<SkinLibraryItem | null>(null)
-const isUploading = ref(false)
+const editingCape = ref<CapeLibraryItem | null>(null)
 const draftName = ref('')
 const draftUrl = ref('')
 const draftSlim = ref(false)
-const importTab = ref('file')
-const urlInput = ref('')
-const isFetchingUrl = ref(false)
-const loadSkinError = ref('')
-const selectedAuthority = ref(AUTHORITY_MICROSOFT)
-const authorities = ref<AuthorityMetadata[]>([])
-const savingCurrentSkinCount = ref(0)
-const currentSkinSaves = new Map<string, Promise<SkinLibraryItem>>()
-let selectionRequest = 0
+const errorMessage = ref('')
+const savingCurrentSkin = ref(false)
 
-const currentCape = computed(() => skinModel?.cape.value)
-const authorityItems = computed(() => [
-  {
-    title: 'Minecraft',
-    value: AUTHORITY_MICROSOFT,
-    icon: '',
-  },
-  ...authorities.value
-    .filter(metadata => metadata.kind === 'yggdrasil')
-    .map(metadata => ({
-      title: metadata.authlibInjector?.meta.serverName || new URL(metadata.authority).host,
-      value: metadata.authority,
-      icon: metadata.favicon || '',
-    })),
-])
-const previewUrl = computed(() => isEditorOpen.value ? draftUrl.value : selectedSkin.value?.url || '')
-const previewSlim = computed(() => isEditorOpen.value ? draftSlim.value : selectedSkin.value?.slim || false)
-const previewName = computed(() => isEditorOpen.value ? draftName.value : selectedSkin.value?.name || '')
-const canSaveDraft = computed(() => !!draftUrl.value && !!draftName.value.trim())
-const activeProfileSkinUrl = computed(() => (props.profile?.skins ? props.profile.skins.find(s => s.state === 'ACTIVE')?.url : undefined) || props.profile?.textures?.SKIN?.url || '')
-const currentSkinDefaultName = computed(() => `${props.profile.name}@${getAuthorityName(props.user.authority)}`)
-const currentSkinLegacyName = computed(() => `${props.profile.name}@${props.user.authority}`)
-const isSavingCurrentSkin = computed(() => savingCurrentSkinCount.value > 0)
+const capePreviewRotation = Math.PI * 0.82
 const accountKey = computed(() => `${props.user.id}:${props.profile.id}`)
+const currentEquippedCapeId = computed(() => equippedCapeIds.value[accountKey.value] || '')
+const currentStoredSkinId = computed(() => equippedSkinIds.value[accountKey.value] || '')
+const activeProfileSkinUrl = computed(() => (props.profile?.skins ? props.profile.skins.find(s => s.state === 'ACTIVE')?.url : undefined) || props.profile?.textures?.SKIN?.url || '')
 const activeProfileSlim = computed(() => {
   const active = props.profile?.skins?.find(s => s.state === 'ACTIVE')
   if (active) return active.variant === 'SLIM'
   return props.profile?.textures?.SKIN?.metadata?.model === 'slim'
 })
 
-const filteredSkins = computed(() => {
-  if (!searchQuery.value) return allSkins.value
-  const q = searchQuery.value.toLowerCase()
-  return allSkins.value.filter(s => s.name.toLowerCase().includes(q))
-})
-
-const currentEquippedSkinId = computed(() => {
-  if (activeProfileSkinUrl.value) {
-    const found = allSkins.value.find(s => isSkinSource(s, activeProfileSkinUrl.value))
-    if (found) return found.id
-  }
-  const equippedSkinId = equippedSkinIds.value[accountKey.value]
-  if (equippedSkinId && allSkins.value.some(s => s.id === equippedSkinId)) {
-    return equippedSkinId
-  }
+const equippedSkinUrl = computed(() => skinModel?.skin.value || activeProfileSkinUrl.value || steveSkin)
+const equippedSkinSlim = computed(() => skinModel?.slim.value ?? activeProfileSlim.value)
+const equippedCapeUrl = computed(() => {
+  const id = currentEquippedCapeId.value
+  if (id) return capes.value.find(c => c.id === id)?.url || ''
   return ''
 })
-
-const isCurrentlyEquipped = computed(() => {
-  if (!selectedSkin.value) return false
-  return isItemEquipped(selectedSkin.value)
+const isNoCapeEquipped = computed(() => !currentEquippedCapeId.value)
+const isDefaultSkinEquipped = computed(() => {
+  if (currentStoredSkinId.value) return false
+  return !allSkins.value.some(s => isSkinEquipped(s))
 })
 
-function isItemEquipped(item: SkinLibraryItem): boolean {
-  return item.id === currentEquippedSkinId.value
-}
-
-const canSaveCurrentToLibrary = computed(() => {
-  if (!activeProfileSkinUrl.value || isSavingCurrentSkin.value) return false
-  return !customSkins.value.some(s => isSkinSource(s, activeProfileSkinUrl.value) || isCurrentSkinDefault(s))
+const filteredSkins = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return allSkins.value
+  return allSkins.value.filter(s => s.name.toLowerCase().includes(q))
+})
+const filteredCapes = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return capes.value
+  return capes.value.filter(c => c.name.toLowerCase().includes(q))
+})
+const canSaveDraft = computed(() => !!draftName.value.trim() && (!!editingSkin.value || !!editingCape.value || !!draftUrl.value))
+const canSaveCurrentSkinToLibrary = computed(() => {
+  if (savingCurrentSkin.value || !equippedSkinUrl.value) return false
+  return !customSkins.value.some(s => s.url === equippedSkinUrl.value || s.source === equippedSkinUrl.value)
 })
 
-function getAuthorityName(authority: string) {
-  if (authority === AUTHORITY_MICROSOFT) return 'mojang'
-  if (authority.startsWith('http://') || authority.startsWith('https://')) {
-    return new URL(authority).hostname
-  }
-  return authority.replace(/^x:\/\//, '')
-}
-
-function isSkinSource(skin: SkinLibraryItem, source: string) {
-  return skin.source === source || skin.url === source
-}
-
-function isCurrentSkinDefault(skin: SkinLibraryItem) {
-  return skin.name === currentSkinDefaultName.value || skin.name === currentSkinLegacyName.value
-}
-
-async function normalizeCurrentSkinName(skin: SkinLibraryItem) {
-  if (skin.name === currentSkinLegacyName.value && skin.name !== currentSkinDefaultName.value) {
-    return updateSkin(skin.id, { name: currentSkinDefaultName.value })
-  }
-  return skin
-}
-
-watch([() => props.modelValue, accountKey, activeProfileSkinUrl], async ([open]) => {
-  const request = ++selectionRequest
+watch(() => props.modelValue, async (open) => {
   if (!open) return
-  loadSkinError.value = ''
-  isEditorOpen.value = false
+  errorMessage.value = ''
+  editorOpen.value = false
   editingSkin.value = null
+  editingCape.value = null
   try {
-    await refresh()
-    if (request !== selectionRequest || !props.modelValue) return
-    const active = allSkins.value.find(s => isItemEquipped(s))
-    if (active) {
-      selectedSkin.value = await normalizeCurrentSkinName(active)
-    } else if (activeProfileSkinUrl.value) {
-      const saved = await persistCurrentSkin()
-      if (saved && request === selectionRequest && props.modelValue) selectedSkin.value = saved
-    } else if (allSkins.value.length > 0) {
-      selectedSkin.value = allSkins.value[0]
-    }
+    await Promise.all([refreshSkins(), refreshCapes()])
+    selectedSkin.value = allSkins.value.find(isSkinEquipped) || allSkins.value[0] || null
+    selectedCape.value = capes.value.find(c => c.id === currentEquippedCapeId.value) || capes.value[0] || null
   } catch (e) {
-    if (request === selectionRequest) {
-      loadSkinError.value = toLocaleError(e)
-    }
+    errorMessage.value = toLocaleError(e)
   }
 })
 
-watch([urlInput, selectedAuthority, importTab], () => {
-  loadSkinError.value = ''
+watch(activeTab, () => {
+  searchQuery.value = ''
+  closeEditor()
 })
+
+function isSkinEquipped(item: SkinLibraryItem) {
+  if (currentStoredSkinId.value && item.id === currentStoredSkinId.value) return true
+  return !!activeProfileSkinUrl.value && (item.url === activeProfileSkinUrl.value || item.source === activeProfileSkinUrl.value)
+}
+function isCapeEquipped(item: CapeLibraryItem) {
+  return item.id === currentEquippedCapeId.value
+}
 
 function openAddEditor() {
   editingSkin.value = null
+  editingCape.value = null
   draftName.value = ''
   draftUrl.value = ''
   draftSlim.value = false
-  urlInput.value = ''
-  selectedAuthority.value = props.user.authority?.startsWith('http') ? props.user.authority : AUTHORITY_MICROSOFT
-  importTab.value = 'file'
-  loadSkinError.value = ''
-  isEditorOpen.value = true
-  void loadAuthorities()
+  errorMessage.value = ''
+  editorOpen.value = true
 }
-
-async function loadAuthorities() {
-  try {
-    authorities.value = await getSupportedAuthorityMetadata()
-    if (!authorityItems.value.some(item => item.value === selectedAuthority.value)) {
-      selectedAuthority.value = AUTHORITY_MICROSOFT
-    }
-  } catch (e) {
-    notify({ level: 'error', title: t('shared.failed'), body: toLocaleError(e) })
-  }
+function closeEditor() {
+  editorOpen.value = false
+  editingSkin.value = null
+  editingCape.value = null
+  draftName.value = ''
+  draftUrl.value = ''
 }
-
-function onEditItem(item: SkinLibraryItem) {
+function editSkin(item: SkinLibraryItem) {
   editingSkin.value = item
+  editingCape.value = null
   draftName.value = item.name
   draftUrl.value = item.url
   draftSlim.value = item.slim
-  isEditorOpen.value = true
+  editorOpen.value = true
 }
-
-function closeEditor() {
-  isEditorOpen.value = false
+function editCape(item: CapeLibraryItem) {
+  editingCape.value = item
   editingSkin.value = null
-  loadSkinError.value = ''
-}
-
-function onModelDetected(modelType: 'default' | 'slim') {
-  if (isEditorOpen.value && !editingSkin.value && !draftUrl.value.includes('http://launcher/media')) {
-    draftSlim.value = modelType === 'slim'
-  }
-}
-
-function onSkinLoadError() {
-  loadSkinError.value = t('userSkin.invalidImage')
+  draftName.value = item.name
+  draftUrl.value = item.url
+  editorOpen.value = true
 }
 
 async function pickFile() {
   const { filePaths } = await showOpenDialog({
-    title: t('userSkin.importFile'),
+    title: activeTab.value === 'skins' ? 'Выбрать скин' : 'Выбрать плащ',
     filters: [{ extensions: ['png'], name: 'PNG Images' }],
   })
-  if (filePaths?.[0]) setFileSkin(filePaths[0])
+  if (filePaths?.[0]) setFile(filePaths[0])
 }
-
 function onDropFile(event: DragEvent) {
   if (!event.dataTransfer) return
   const [filePath] = getDropFilePaths(event.dataTransfer.files)
-  if (filePath?.toLowerCase().endsWith('.png')) setFileSkin(filePath)
+  if (filePath?.toLowerCase().endsWith('.png')) setFile(filePath)
 }
-
-function setFileSkin(filePath: string) {
-  loadSkinError.value = ''
+function setFile(filePath: string) {
   draftUrl.value = `http://launcher/media?path=${filePath}`
-  if (!draftName.value) {
-    draftName.value = filePath.split(/[/\\]/).pop()?.replace(/\.png$/i, '') || 'Skin'
-  }
-}
-
-async function fetchFromUrl() {
-  const input = urlInput.value.trim()
-  if (!input) return
-  loadSkinError.value = ''
-  isFetchingUrl.value = true
-  try {
-    if (input.startsWith('http://') || input.startsWith('https://')) {
-      draftUrl.value = input
-      if (!draftName.value) draftName.value = 'Web Skin'
-    } else {
-      const resolved = await fetchSkinFromUsername(input, selectedAuthority.value)
-      draftUrl.value = resolved.url
-      draftSlim.value = resolved.slim
-      if (!draftName.value) draftName.value = `${input}@${getAuthorityName(selectedAuthority.value)}`
-    }
-  } catch (e) {
-    loadSkinError.value = toLocaleError(e)
-  } finally {
-    isFetchingUrl.value = false
-  }
-}
-
-async function onDeleteItem(item: SkinLibraryItem) {
-  try {
-    await removeSkin(item.id)
-    if (selectedSkin.value?.id === item.id) {
-      selectedSkin.value = allSkins.value[0] || null
-    }
-  } catch (e) {
-    notify({ level: 'error', title: t('userSkin.skinDeleteFailed'), body: toLocaleError(e) })
-  }
+  if (!draftName.value) draftName.value = filePath.split(/[/\\]/).pop()?.replace(/\.png$/i, '') || (activeTab.value === 'skins' ? 'Skin' : 'Cape')
 }
 
 async function saveDraft(equipImmediately: boolean) {
   if (!canSaveDraft.value) return
   try {
-    if (editingSkin.value) {
-      const updated = await updateSkin(editingSkin.value.id, { name: draftName.value.trim(), slim: draftSlim.value })
-      selectedSkin.value = updated
-      notify({ level: 'success', title: t('userSkin.skinUpdated') })
+    if (activeTab.value === 'skins') {
+      let item: SkinLibraryItem
+      if (editingSkin.value) item = await updateSkin(editingSkin.value.id, { name: draftName.value.trim(), slim: draftSlim.value })
+      else item = await addSkin({ name: draftName.value.trim(), url: draftUrl.value, slim: draftSlim.value })
+      selectedSkin.value = item
+      if (equipImmediately) await equipSkin(item)
     } else {
-      const created = await addSkin({ name: draftName.value.trim(), url: draftUrl.value, slim: draftSlim.value })
-      selectedSkin.value = created
-      if (equipImmediately) {
-        await equipSelectedSkin(created)
-      }
+      let item: CapeLibraryItem
+      if (editingCape.value) item = await updateCape(editingCape.value.id, { name: draftName.value.trim() })
+      else item = await addCape({ name: draftName.value.trim(), url: draftUrl.value })
+      selectedCape.value = item
+      if (equipImmediately) await equipCape(item)
     }
     closeEditor()
   } catch (e) {
-    if (editingSkin.value) {
-      notify({ level: 'error', title: t('userSkin.saveFailed'), body: toLocaleError(e) })
-    } else {
-      loadSkinError.value = toLocaleError(e)
-    }
+    errorMessage.value = toLocaleError(e)
   }
 }
 
-async function persistCurrentSkin() {
-  const url = activeProfileSkinUrl.value
-  const name = currentSkinDefaultName.value
-  const slim = activeProfileSlim.value
-  if (!url) return undefined
-  const existing = customSkins.value.find(s => isSkinSource(s, url) || isCurrentSkinDefault(s))
-  if (existing) return normalizeCurrentSkinName(existing)
-
-  const saving = currentSkinSaves.get(url)
-  if (saving) return saving
-
-  const promise = addSkin({ name, url, slim })
-  currentSkinSaves.set(url, promise)
-  savingCurrentSkinCount.value++
-  try {
-    return await promise
-  } finally {
-    currentSkinSaves.delete(url)
-    savingCurrentSkinCount.value--
-  }
-}
-
-async function saveCurrentToLibrary() {
-  try {
-    const saved = await persistCurrentSkin()
-    if (saved) selectedSkin.value = saved
-  } catch (e) {
-    loadSkinError.value = toLocaleError(e)
-  }
-}
-
-async function exportSelectedSkin() {
-  if (!selectedSkin.value) return
-  const { showSaveDialog } = windowController
-  const fileName = selectedSkin.value.name.replace(/[<>:"/\\|?*]/g, '_')
-  const { filePath } = await showSaveDialog({
-    title: t('userSkin.saveTitle'),
-    defaultPath: `${fileName}.png`,
-    filters: [{ extensions: ['png'], name: 'PNG Images' }],
-  })
-  if (filePath && skinModel?.exportTo) {
-    try {
-      await skinModel.exportTo({ path: filePath, url: selectedSkin.value.url })
-      notify({ level: 'success', title: t('userSkin.saveSuccess') })
-    } catch (e) {
-      notify({
-        level: 'error',
-        title: t('userSkin.saveFailed'),
-        body: toLocaleError(e),
-      })
-    }
-  }
-}
-
-async function equipSelectedSkin(targetSkin?: SkinLibraryItem) {
-  const item = targetSkin || selectedSkin.value
-  if (!item || !item.url || !skinModel) return
-  isUploading.value = true
+async function equipSkin(item: SkinLibraryItem) {
+  selectedSkin.value = item
+  if (!skinModel) return
   try {
     skinModel.skin.value = item.url
     skinModel.slim.value = item.slim
     await skinModel.save()
     await setEquippedSkin(accountKey.value, item.id)
-    selectedSkin.value = item
   } catch (e) {
-    notify({
-      level: 'error',
-      title: t('userSkin.uploadFailed'),
-      body: toLocaleError(e),
-    })
-  } finally {
-    isUploading.value = false
+    errorMessage.value = toLocaleError(e)
+  }
+}
+async function equipDefaultSkin() {
+  if (!skinModel) return
+  try {
+    skinModel.skin.value = steveSkin
+    skinModel.slim.value = false
+    await skinModel.save()
+    await setEquippedSkin(accountKey.value, '')
+    selectedSkin.value = null
+  } catch (e) {
+    errorMessage.value = toLocaleError(e)
+  }
+}
+async function equipCape(item: CapeLibraryItem) {
+  selectedCape.value = item
+  try {
+    await setEquippedCape(accountKey.value, item.id)
+  } catch (e) {
+    errorMessage.value = toLocaleError(e)
+  }
+}
+async function unequipCape() {
+  try {
+    await setEquippedCape(accountKey.value, '')
+    selectedCape.value = null
+  } catch (e) {
+    errorMessage.value = toLocaleError(e)
   }
 }
 
-function onEquipItem(item: SkinLibraryItem) {
-  selectedSkin.value = item
-  equipSelectedSkin(item)
+async function deleteSkin(item: SkinLibraryItem) {
+  try {
+    await removeSkin(item.id)
+    if (selectedSkin.value?.id === item.id) selectedSkin.value = allSkins.value[0] || null
+  } catch (e) {
+    errorMessage.value = toLocaleError(e)
+  }
+}
+async function deleteCape(item: CapeLibraryItem) {
+  try {
+    await removeCape(item.id)
+    if (selectedCape.value?.id === item.id) selectedCape.value = capes.value[0] || null
+  } catch (e) {
+    errorMessage.value = toLocaleError(e)
+  }
+}
+
+async function saveCurrentSkinToLibrary() {
+  if (!canSaveCurrentSkinToLibrary.value) return
+  savingCurrentSkin.value = true
+  try {
+    const item = await addSkin({
+      name: props.profile.name || 'Current skin',
+      url: equippedSkinUrl.value,
+      slim: equippedSkinSlim.value,
+    })
+    selectedSkin.value = item
+    await setEquippedSkin(accountKey.value, item.id)
+  } catch (e) {
+    errorMessage.value = toLocaleError(e)
+  } finally {
+    savingCurrentSkin.value = false
+  }
+}
+async function saveCurrentCapeToLibrary() {
+  // Local equipped capes already live in this library, so there is nothing to duplicate.
+  notify({ level: 'info', title: 'Плащ уже сохранён в локальном гардеробе' })
+}
+
+async function exportSelectedSkin() {
+  if (!selectedSkin.value || !skinModel?.exportTo) return
+  const fileName = selectedSkin.value.name.replace(/[<>:"/\\|?*]/g, '_')
+  const { filePath } = await showSaveDialog({
+    title: 'Сохранить скин',
+    defaultPath: `${fileName}.png`,
+    filters: [{ extensions: ['png'], name: 'PNG Images' }],
+  })
+  if (!filePath) return
+  try {
+    await skinModel.exportTo({ path: filePath, url: selectedSkin.value.url })
+  } catch (e) {
+    errorMessage.value = toLocaleError(e)
+  }
+}
+async function exportSelectedCape() {
+  if (!selectedCape.value || !skinModel?.exportTo) return
+  const fileName = selectedCape.value.name.replace(/[<>:"/\\|?*]/g, '_')
+  const { filePath } = await showSaveDialog({
+    title: 'Сохранить плащ',
+    defaultPath: `${fileName}.png`,
+    filters: [{ extensions: ['png'], name: 'PNG Images' }],
+  })
+  if (!filePath) return
+  try {
+    await skinModel.exportTo({ path: filePath, url: selectedCape.value.url })
+  } catch (e) {
+    errorMessage.value = toLocaleError(e)
+  }
 }
 </script>
 
 <style scoped>
-.skin-library-dialog {
-  background: rgba(var(--v-theme-surface), 0.95);
+.wardrobe-dialog {
+  background: rgba(var(--v-theme-surface), 0.96);
   backdrop-filter: blur(20px);
 }
-
+.wardrobe-preview {
+  background: radial-gradient(circle at 50% 50%, rgba(var(--v-theme-primary), 0.08), transparent 68%);
+}
+.wardrobe-tabs {
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.1);
+}
 .file-drop-zone {
   background: rgba(var(--v-theme-surface), 0.5);
 }
-
-.authority-select {
-  width: 190px;
+.default-card {
+  background: rgba(var(--v-theme-on-surface), 0.03);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+.default-card:hover {
+  background: rgba(var(--v-theme-on-surface), 0.07);
+}
+.default-card.selected {
+  background: rgba(var(--v-theme-primary), 0.1);
+  box-shadow: inset 0 0 0 1.5px rgba(var(--v-theme-primary), 0.5);
+}
+.cape-card {
+  background: rgba(var(--v-theme-on-surface), 0.03);
+}
+.cape-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.cape-card:hover .cape-actions {
+  opacity: 1;
 }
 </style>
