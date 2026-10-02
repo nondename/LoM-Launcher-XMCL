@@ -2,7 +2,7 @@
     "name": "xmcl",
     "private": true,
     "main": "./index.js",
-    "version": "0.1.4",
+    "version": "0.1.5",
     "author": "ci010 <cijhn@hotmail.com>",
     "description": "LoM Launcher - Legends of Medieval launcher",
     "license": "MIT",
