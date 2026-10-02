@@ -18,6 +18,7 @@ const props = withDefaults(defineProps<{
   name?: string
   animation?: 'walking' | 'none' | 'idle' | 'running'
   paused?: boolean
+  rotationY?: number
 }>(), {
   width: 210,
   height: 400,
@@ -26,6 +27,7 @@ const props = withDefaults(defineProps<{
   name: 'Steve',
   skin: '',
   animation: 'idle',
+  rotationY: 0,
 })
 
 const canvasRef = ref(null)
@@ -80,6 +82,10 @@ async function loadSkin() {
   }
 }
 
+function applyRotation() {
+  if (viewer) viewer.playerObject.rotation.y = props.rotationY
+}
+
 onMounted(() => {
   viewer = new SkinViewer({
     canvas: canvasRef.value!,
@@ -92,6 +98,7 @@ onMounted(() => {
 
   viewer.animation = animationObject.value
   viewer.renderPaused = props.paused ?? false
+  applyRotation()
 
   loadSkin()
   if (props.cape) {
@@ -105,6 +112,7 @@ watch(animationObject, (v) => {
 
 watch(() => props.skin, loadSkin)
 watch(() => props.slim, loadSkin)
+watch(() => props.rotationY, applyRotation)
 
 watch(() => props.cape, (v) => {
   const activeViewer = viewer
