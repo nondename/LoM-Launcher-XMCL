@@ -13,14 +13,12 @@
   >
     <!-- Skin Preview Area -->
     <div class="skin-preview-area relative w-full flex items-center justify-center py-5 px-3">
-      <!-- Equipped glow -->
       <div
         v-if="isEquipped"
         class="absolute inset-0 rounded-t-xl"
         style="background: radial-gradient(ellipse at center bottom, rgba(76,175,80,0.12) 0%, transparent 70%);"
       />
 
-      <!-- 2D Skin -->
       <PlayerSkin2D
         :src="skin.url"
         :slim="skin.slim"
@@ -29,15 +27,16 @@
         class="relative z-10 skin-figure"
       />
 
-      <!-- Equipped checkmark -->
-      <div
+      <v-chip
         v-if="isEquipped"
-        class="absolute top-2 left-2 z-20 w-5 h-5 rounded-full bg-green-500 flex items-center justify-center shadow-sm"
+        size="x-small"
+        color="success"
+        class="absolute top-2 left-2 z-20"
       >
-        <v-icon size="12" color="white">check</v-icon>
-      </div>
+        <v-icon start size="12">check</v-icon>
+        Надет
+      </v-chip>
 
-      <!-- Model type pill -->
       <div
         class="absolute top-2 right-2 z-20 px-1.5 py-px rounded-md text-[9px] font-bold uppercase tracking-wide"
         :class="skin.slim
@@ -47,7 +46,6 @@
         {{ skin.slim ? 'Slim' : 'Classic' }}
       </div>
 
-      <!-- Hover action buttons — float at bottom without overlay -->
       <div
         class="action-bar absolute bottom-1.5 left-0 right-0 flex items-center justify-center gap-1.5 z-30"
       >
@@ -87,7 +85,6 @@
       </div>
     </div>
 
-    <!-- Name bar -->
     <div class="w-full px-2.5 py-2 text-center">
       <div class="text-[11px] font-semibold truncate leading-tight opacity-80" :title="skin.name">
         {{ skin.name }}
@@ -101,7 +98,7 @@ import PlayerSkin2D from '@/components/PlayerSkin2D.vue'
 import { vSharedTooltip } from '@/directives/sharedTooltip'
 import { SkinLibraryItem } from '@/composables/userSkinLibrary'
 
-const props = defineProps<{
+defineProps<{
   skin: SkinLibraryItem
   isSelected: boolean
   isEquipped: boolean
