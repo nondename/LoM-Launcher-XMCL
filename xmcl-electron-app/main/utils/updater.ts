@@ -28,6 +28,11 @@ const LOM_REPOSITORY = 'nondename/LoM-Launcher-XMCL'
 const LOM_RELEASES_URL = `https://github.com/${LOM_REPOSITORY}/releases`
 const LOM_RELEASES_API = `https://api.github.com/repos/${LOM_REPOSITORY}/releases`
 
+type LoMReleaseFile = ReleaseInfo['files'][number] & {
+  apiUrl?: string
+  digest?: string
+}
+
 function normalizeVersion(version: string) {
   return version.trim().replace(/^v/i, '')
 }
@@ -74,6 +79,11 @@ function parseSha256(value: string) {
   return /^[a-f0-9]{64}$/.test(hash) ? hash : ''
 }
 
+function parseAssetSha256(value?: string) {
+  const hash = value?.trim().match(/^sha256:([a-f0-9]{64})$/i)?.[1]?.toLowerCase() ?? ''
+  return hash
+}
+
 async function downloadAsarUpdate(
   app: ElectronLauncherApp,
   destination: string,
@@ -84,27 +94,34 @@ async function downloadAsarUpdate(
   } & DownloadBaseOptions,
 ): Promise<void> {
   const fileName = getAsarName(app, updateInfo.name)
-  const asar = updateInfo.files.find((file) => file.name === fileName)
-  const shaFile = updateInfo.files.find((file) => file.name === `${fileName}.sha256`)
+  const files = updateInfo.files as LoMReleaseFile[]
+  const asar = files.find((file) => file.name === fileName)
+  const shaFile = files.find((file) => file.name === `${fileName}.sha256`)
 
   if (!asar) {
     throw new AnyError('UpdateAsarError', `LoM update asset is missing: ${fileName}`)
   }
-  if (!shaFile) {
-    throw new AnyError('UpdateAsarError', `LoM update checksum is missing: ${fileName}.sha256`)
+
+  // GitHub exposes the uploaded asset digest directly in the release API.
+  // Prefer it so a second request to the .sha256 release asset cannot block
+  // the entire updater. Older releases without digest still use .sha256.
+  let expectedSha256 = parseAssetSha256(asar.digest)
+  if (!expectedSha256 && shaFile) {
+    try {
+      const shaResponse = await app.fetch(shaFile.url, { signal: options?.abortSignal })
+      if (shaResponse.ok) {
+        expectedSha256 = parseSha256(await shaResponse.text())
+      }
+    } catch {
+      options?.abortSignal?.throwIfAborted()
+    }
   }
 
-  const shaResponse = await app.fetch(shaFile.url, { signal: options?.abortSignal })
-  if (!shaResponse.ok) {
+  if (!expectedSha256) {
     throw new AnyError(
       'UpdateAsarError',
-      `Cannot download LoM update checksum: HTTP ${shaResponse.status}`,
+      `Cannot resolve SHA-256 checksum for ${fileName}`,
     )
-  }
-
-  const expectedSha256 = parseSha256(await shaResponse.text())
-  if (!expectedSha256) {
-    throw new AnyError('UpdateAsarError', `Invalid SHA-256 file for ${fileName}`)
   }
 
   const currentSha256 = await checksum(destination, 'sha256').catch(() => '')
@@ -116,13 +133,38 @@ async function downloadAsarUpdate(
   await unlinkAsync(tempFile).catch(() => {})
 
   try {
-    await download({
-      url: asar.url,
-      destination: tempFile,
-      tracker: onDownloadSingle(options?.tracker, 'download-update.asar', { url: asar.url }),
-      signal: options?.abortSignal,
-      ...getDownloadBaseOptions(options),
-    })
+    try {
+      await download({
+        url: asar.url,
+        destination: tempFile,
+        tracker: onDownloadSingle(options?.tracker, 'download-update.asar', { url: asar.url }),
+        signal: options?.abortSignal,
+        ...getDownloadBaseOptions(options),
+      })
+    } catch (primaryError) {
+      options?.abortSignal?.throwIfAborted()
+      if (!asar.apiUrl) {
+        throw primaryError
+      }
+
+      // Some Electron/network combinations can resolve api.github.com while
+      // the browser_download_url redirect path fails. The asset API provides
+      // a second route to exactly the same bytes.
+      const response = await app.fetch(asar.apiUrl, {
+        headers: {
+          Accept: 'application/octet-stream',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+        signal: options?.abortSignal,
+      })
+      if (!response.ok) {
+        throw new AnyError(
+          'UpdateAsarError',
+          `Cannot download LoM update asset: HTTP ${response.status}`,
+        )
+      }
+      await writeFile(tempFile, Buffer.from(await response.arrayBuffer()))
+    }
 
     const actualSha256 = (await checksum(tempFile, 'sha256')).toLowerCase()
     if (actualSha256 !== expectedSha256) {
@@ -205,13 +247,17 @@ export class ElectronUpdater implements LauncherAppUpdater {
 
     const files = (result.assets ?? []).map((asset: any) => ({
       url: asset.browser_download_url,
+      apiUrl: asset.url,
       name: asset.name,
-    })) as Array<{ url: string; name: string }>
+      digest: asset.digest,
+    })) as LoMReleaseFile[]
 
     const version = normalizeVersion(result.tag_name)
     const asarName = getAsarName(this.app, version)
-    const hasAsar = files.some((file) => file.name === asarName)
+    const asar = files.find((file) => file.name === asarName)
+    const hasAsar = !!asar
     const hasChecksum = files.some((file) => file.name === `${asarName}.sha256`)
+    const hasAssetDigest = !!parseAssetSha256(asar?.digest)
     const newUpdate = compareVersions(version, this.app.version) > 0
 
     const updateInfo: ReleaseInfo = {
@@ -223,7 +269,13 @@ export class ElectronUpdater implements LauncherAppUpdater {
       operation: ElectronUpdateOperation.Manual,
     }
 
-    if (newUpdate && hasAsar && hasChecksum && this.app.env !== 'appx' && this.app.env !== 'appimage') {
+    if (
+      newUpdate &&
+      hasAsar &&
+      (hasAssetDigest || hasChecksum) &&
+      this.app.env !== 'appx' &&
+      this.app.env !== 'appimage'
+    ) {
       updateInfo.operation = ElectronUpdateOperation.Asar
     }
 
