@@ -36,21 +36,19 @@
       </v-alert>
       <v-card-actions>
         <v-btn
-          @click="openOfficialWebsite()"
-         variant="text">
-          <v-icon
-            start
-          >
+          @click="openProject()"
+          variant="text"
+        >
+          <v-icon start>
             web
           </v-icon>
           {{ t('setting.officialWebsite') }}
         </v-btn>
         <v-btn
           @click="openGithub()"
-         variant="text">
-          <v-icon
-            start
-          >
+          variant="text"
+        >
+          <v-icon start>
             signpost
           </v-icon>
           {{ t('setting.githubRelease') }}
@@ -63,10 +61,9 @@
             :loading="downloadingUpdate"
             :disabled="downloadingUpdate"
             @click="downloadUpdate()"
-           variant="text">
-            <v-icon
-              start
-            >
+            variant="text"
+          >
+            <v-icon start>
               cloud_download
             </v-icon>
             {{ t('launcherUpdate.updateToThisVersion') }}
@@ -77,9 +74,7 @@
             :loading="installing"
             @click="quitAndInstall()"
           >
-            <v-icon
-              start
-            >
+            <v-icon start>
               refresh
             </v-icon>
             {{ t('launcherUpdate.installAndQuit') }}
@@ -90,9 +85,8 @@
     <v-card
       v-else
       hover
-
       style="width: 100%"
-      to="https://github.com/voxelum/x-minecraft-launcher/releases"
+      to="https://github.com/nondename/LoM-Launcher-XMCL/releases"
       target="browser"
       push
     >
@@ -127,23 +121,22 @@ const {
 } = injection(kUpdateSettings)
 
 function renderUpdate() {
-  const body = state.value?.updateInfo?.body ?? ''
-  const transformed = body.replace(/## \[(.+)\]\(#.+\)/g, (str, v) => `## ${v}`)
+  const updateBody = state.value?.updateInfo?.body ?? ''
+  const transformed = updateBody.replace(/## \[(.+)\]\(#.+\)/g, (str, v) => `## ${v}`)
   return render(transformed)
 }
 const body = computed(() => state.value?.updateInfo?.operation === 'autoupdater' ? state.value?.updateInfo.body : renderUpdate())
 const env = injection(kEnvironment)
 const isAppX = computed(() => env.value?.env === 'appx')
-const isAppImage = computed(() => env.value?.env === 'appimage')
 const hintRedownload = computed(() =>
   state.value?.updateInfo?.operation === 'manual',
 )
 
-const openOfficialWebsite = () => {
-  window.open('https://xmcl.app', 'browser')
+const openProject = () => {
+  window.open('https://github.com/nondename/LoM-Launcher-XMCL', 'browser')
 }
 const openGithub = () => {
-  window.open('https://github.com/voxelum/x-minecraft-launcher/releases', 'browser')
+  window.open('https://github.com/nondename/LoM-Launcher-XMCL/releases', 'browser')
 }
 </script>
 
