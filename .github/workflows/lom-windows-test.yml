@@ -5,7 +5,6 @@ on:
     branches:
       - master
       - 'fix/**'
-      - 'feature/in-app-launcher-update'
   workflow_dispatch:
 
 jobs:
@@ -100,7 +99,7 @@ jobs:
             if (!antiqueResponse.ok) {
               throw new Error(`Antique Atlas direct download HTTP ${antiqueResponse.status}: ${antiqueAtlas.url}`)
             }
-            const antiqueData = new Uint8Array(await antiqueResponse.arrayBuffer())
+            const antiqueData = Buffer.from(await antiqueResponse.arrayBuffer())
             const antiqueMd5 = createHash('md5').update(antiqueData).digest('hex')
             if (antiqueMd5 !== antiqueAtlas.hash) {
               throw new Error(`Antique Atlas MD5 mismatch expected=${antiqueAtlas.hash} actual=${antiqueMd5}`)
