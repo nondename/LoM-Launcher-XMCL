@@ -297,6 +297,7 @@
 <script lang="ts" setup>
 import PlayerSkin2D from '@/components/PlayerSkin2D.vue'
 import SkinView from '@/components/SkinView.vue'
+import UserSkinCard from '@/components/UserSkinCard.vue'
 import steveSkin from '@/assets/steve_skin.png'
 import { getDropFilePaths } from '@/composables/dropHandler'
 import { useLocaleError } from '@/composables/error'
