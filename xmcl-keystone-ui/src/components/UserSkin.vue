@@ -93,7 +93,7 @@
       </v-fab-transition>
     </div>
     <v-dialog v-model="isImportSkinDialogShown" width="400">
-      <ImportSkinUrlForm @input="skin = $event" />
+      <ImportSkinUrlForm @input="importSkinFromUrl" />
     </v-dialog>
     <UserSkinLibraryDialog
       v-model="isSkinLibraryDialogShown"
@@ -107,6 +107,7 @@
 import SkinView from '@/components/SkinView.vue'
 import UserSkinLibraryDialog from '@/components/UserSkinLibraryDialog.vue'
 import { getDropFilePaths } from '@/composables/dropHandler'
+import { useUserSkinLibrary } from '@/composables/userSkinLibrary'
 import { vSharedTooltip } from '@/directives/sharedTooltip'
 import { GameProfileAndTexture, UserProfile } from '@xmcl/runtime-api'
 import { useNotifier } from '../composables/notifier'
@@ -134,6 +135,11 @@ const { t } = useI18n()
 const hover = ref(false)
 const { notify } = useNotifier()
 const toLocaleError = useLocaleError()
+const {
+  customSkins,
+  addSkin: addSkinToLibrary,
+  updateSkin: updateLibrarySkin,
+} = useUserSkinLibrary()
 
 const gameProfile = computed(() => props.profile)
 const selected = computed(() => props.user.selectedProfile === props.profile.id)
@@ -171,6 +177,57 @@ const slimToggle = computed({
 const { showOpenDialog, showSaveDialog } = windowController
 const isImportSkinDialogShown = ref(false)
 const isSkinLibraryDialogShown = ref(false)
+const pendingLibraryImport = ref<{ source: string; name: string } | null>(null)
+
+function getSkinName(source: string) {
+  const clean = source.split(/[?#]/, 1)[0]
+  const fileName = clean.split(/[/\\]/).pop() || ''
+  try {
+    return decodeURIComponent(fileName).replace(/\.png$/i, '') || 'Skin'
+  } catch {
+    return fileName.replace(/\.png$/i, '') || 'Skin'
+  }
+}
+
+function stageImportedSkin(source: string, displayName?: string) {
+  pendingLibraryImport.value = {
+    source,
+    name: displayName || getSkinName(source),
+  }
+  inferModelType.value = true
+  skin.value = source
+}
+
+async function persistImportedSkin(modelType: 'default' | 'slim') {
+  const pendingImport = pendingLibraryImport.value
+  if (!pendingImport) return
+
+  // Clear first so repeated skinview3d model events cannot create duplicates.
+  pendingLibraryImport.value = null
+  const isSlim = modelType !== 'default'
+
+  try {
+    const existing = customSkins.value.find(item => item.source === pendingImport.source || item.url === pendingImport.source)
+    if (existing) {
+      if (existing.slim !== isSlim) {
+        await updateLibrarySkin(existing.id, { slim: isSlim })
+      }
+      return
+    }
+
+    await addSkinToLibrary({
+      name: pendingImport.name,
+      url: pendingImport.source,
+      slim: isSlim,
+    })
+  } catch (e) {
+    notify({
+      level: 'error',
+      title: 'Не удалось сохранить скин в локальный гардероб',
+      body: toLocaleError(e),
+    })
+  }
+}
 
 const onModelChange = (modelType: 'default' | 'slim') => {
   if (inferModelType.value) {
@@ -178,8 +235,12 @@ const onModelChange = (modelType: 'default' | 'slim') => {
     slim.value = modelType !== 'default'
     inferModelType.value = false
   }
+  if (pendingLibraryImport.value) {
+    void persistImportedSkin(modelType)
+  }
 }
 const onPreviewError = (error: string) => {
+  pendingLibraryImport.value = null
   if (error === 'invalid-skin-size') {
     notify({
       level: 'error',
@@ -196,9 +257,13 @@ async function loadSkin() {
     filters: [{ extensions: ['png'], name: 'PNG Images' }],
   })
   if (filePaths && filePaths[0]) {
-    skin.value = `http://launcher/media?path=${filePaths[0]}`
-    inferModelType.value = true
+    const filePath = filePaths[0]
+    stageImportedSkin(`http://launcher/media?path=${filePath}`, getSkinName(filePath))
   }
+}
+function importSkinFromUrl(url: string) {
+  isImportSkinDialogShown.value = false
+  stageImportedSkin(url)
 }
 async function exportSkin() {
   const { filePath } = await showSaveDialog({
@@ -215,8 +280,7 @@ async function dropSkin(e: DragEvent) {
   if (e.dataTransfer) {
     const [filePath] = getDropFilePaths(e.dataTransfer.files)
     if (filePath) {
-      skin.value = `http://launcher/media?path=${filePath}`
-      inferModelType.value = true
+      stageImportedSkin(`http://launcher/media?path=${filePath}`, getSkinName(filePath))
     }
   }
 }
