@@ -270,3 +270,19 @@ const save_ = async () => {
 .my-slider-x-transition-leave-to {
   transform: translateX(100%);
 }
+
+.skin-model-toggle {
+  background: rgba(var(--v-theme-on-surface), 0.08) !important;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(var(--v-theme-on-surface), 0.1) !important;
+}
+
+.skin-model-toggle .v-btn {
+  color: rgba(var(--v-theme-on-surface), 0.5) !important;
+}
+
+.skin-model-toggle .v-btn--active {
+  color: rgb(var(--v-theme-on-surface)) !important;
+  background: rgba(var(--v-theme-on-surface), 0.12) !important;
+}
+</style>
