@@ -16,12 +16,10 @@ export const config = {
     name: 'LoM Launcher',
     schemes: ['xmcl'],
   },
-  // assign publish for auto-updater
-  // set this to your own repo!
   publish: [{
     provider: 'github',
-    owner: 'voxelum',
-    repo: 'x-minecraft-launcher',
+    owner: 'nondename',
+    repo: 'LoM-Launcher-XMCL',
   }],
   files: [{
     from: 'dist',
