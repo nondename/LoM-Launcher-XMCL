@@ -17,7 +17,6 @@
         />
       </v-fab-transition>
     </div>
-    <!-- Slim/Classic toggle (top-right, hover only) -->
     <transition name="fade-transition">
       <v-btn-toggle
         v-if="!hideControls && hover && canUploadSkin"
@@ -57,19 +56,6 @@
       @drop.prevent="dropSkin"
       @dragover.prevent="() => {}"
     />
-    <div v-if="hideControls" class="w-full px-3 -mt-2">
-      <v-btn
-        variant="tonal"
-        size="small"
-        block
-        color="secondary"
-        class="rounded-lg font-medium text-xs tracking-normal"
-        @click="isCapeLibraryDialogShown = true"
-      >
-        <v-icon start size="16">flag</v-icon>
-        Гардероб плащей
-      </v-btn>
-    </div>
     <div v-if="!hideControls" class="absolute bottom-4 flex flex-none flex-shrink gap-4">
       <v-fab-transition>
         <v-btn
@@ -89,7 +75,6 @@
         :has-cape="canUploadCape"
         :disabled="pending"
         :open-library="() => (isSkinLibraryDialogShown = true)"
-        :open-cape-library="() => (isCapeLibraryDialogShown = true)"
         :upload="() => (isImportSkinDialogShown = true)"
         :save="exportSkin"
         :load="loadSkin"
@@ -109,10 +94,17 @@
     <v-dialog v-model="isImportSkinDialogShown" width="400">
       <ImportSkinUrlForm @input="skin = $event" />
     </v-dialog>
+    <UserSkinLibraryDialog
+      v-model="isSkinLibraryDialogShown"
+      :user="user"
+      :profile="profile"
+      @open-capes="openCapeWardrobe"
+    />
     <UserCapeLibraryDialog
       v-model="isCapeLibraryDialogShown"
       :user="user"
       :profile="profile"
+      @open-skins="openSkinWardrobe"
     />
   </div>
 </template>
@@ -120,6 +112,7 @@
 <script lang="ts" setup>
 import SkinView from '@/components/SkinView.vue'
 import UserCapeLibraryDialog from '@/components/UserCapeLibraryDialog.vue'
+import UserSkinLibraryDialog from '@/components/UserSkinLibraryDialog.vue'
 import { getDropFilePaths } from '@/composables/dropHandler'
 import { vSharedTooltip } from '@/directives/sharedTooltip'
 import { GameProfileAndTexture, UserProfile } from '@xmcl/runtime-api'
@@ -186,6 +179,16 @@ const { showOpenDialog, showSaveDialog } = windowController
 const isImportSkinDialogShown = ref(false)
 const isSkinLibraryDialogShown = ref(false)
 const isCapeLibraryDialogShown = ref(false)
+
+function openCapeWardrobe() {
+  isSkinLibraryDialogShown.value = false
+  nextTick(() => { isCapeLibraryDialogShown.value = true })
+}
+
+function openSkinWardrobe() {
+  isCapeLibraryDialogShown.value = false
+  nextTick(() => { isSkinLibraryDialogShown.value = true })
+}
 
 const onModelChange = (modelType: 'default' | 'slim') => {
   if (inferModelType.value) {
