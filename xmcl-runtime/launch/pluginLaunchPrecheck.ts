@@ -17,6 +17,7 @@ import { isLinkTo, readlinkSafe } from '~/instance/utils/readLinkSafe'
 import { getManagedJavaComponent, JavaService, JavaValidation } from '~/java'
 import { LaunchService } from '~/launch'
 import { PeerService } from '~/peer'
+import { LocalSkinService } from '~/user/LocalSkinService'
 import { linkOrCopyDirectory, missing } from '~/util/fs'
 
 export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
@@ -24,6 +25,15 @@ export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
   const getPath = await app.registry.get(kGameDataPath)
 
   const logger = app.getLogger('LaunchPrecheck')
+
+  launchService.registerMiddleware({
+    name: 'lom-local-skin',
+    async onBeforeLaunch(input, payload) {
+      if (payload.side !== 'client') return
+      const localSkinService = await app.registry.getOrCreate(LocalSkinService)
+      await localSkinService.prepareLaunchSkin(input.user, input.gameDirectory)
+    },
+  })
 
   launchService.registerMiddleware({
     name: 'lom-modpack-update',

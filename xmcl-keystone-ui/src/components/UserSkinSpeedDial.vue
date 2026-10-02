@@ -13,7 +13,7 @@
           v-shared-tooltip.left="() => t('userSkin.importFile')"
           icon="edit"
           color="primary"
-          :disabled="disabled || !hasSkin"
+          :disabled="disabled || (!hasSkin && !openLibrary && !openCapeLibrary)"
           @click="load"
         />
       </v-fab-transition>
@@ -28,6 +28,15 @@
       @click="openLibrary"
     />
     <v-btn
+      v-if="openCapeLibrary"
+      v-shared-tooltip.left="() => 'Локальные плащи'"
+      icon="flag"
+      size="small"
+      color="teal"
+      :disabled="disabled"
+      @click="openCapeLibrary"
+    />
+    <v-btn
       v-shared-tooltip.left="() => t('userSkin.importLink')"
       icon="link"
       size="small"
@@ -40,7 +49,7 @@
       icon="save"
       size="small"
       color="blue"
-      :disabled="disabled"
+      :disabled="disabled || !hasSkin"
       @click="save"
     />
   </v-speed-dial>
@@ -54,6 +63,7 @@ defineProps<{
   upload(): void
   save(): void
   openLibrary?(): void
+  openCapeLibrary?(): void
   disabled: boolean
   hasSkin: boolean
   hasCape: boolean

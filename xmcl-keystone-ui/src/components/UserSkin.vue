@@ -76,6 +76,7 @@
         :has-cape="canUploadCape"
         :disabled="pending"
         :open-library="() => (isSkinLibraryDialogShown = true)"
+        :open-cape-library="() => (isCapeLibraryDialogShown = true)"
         :upload="() => (isImportSkinDialogShown = true)"
         :save="exportSkin"
         :load="loadSkin"
@@ -95,11 +96,17 @@
     <v-dialog v-model="isImportSkinDialogShown" width="400">
       <ImportSkinUrlForm @input="skin = $event" />
     </v-dialog>
+    <UserCapeLibraryDialog
+      v-model="isCapeLibraryDialogShown"
+      :user="user"
+      :profile="profile"
+    />
   </div>
 </template>
 
 <script lang="ts" setup>
 import SkinView from '@/components/SkinView.vue'
+import UserCapeLibraryDialog from '@/components/UserCapeLibraryDialog.vue'
 import { getDropFilePaths } from '@/composables/dropHandler'
 import { vSharedTooltip } from '@/directives/sharedTooltip'
 import { GameProfileAndTexture, UserProfile } from '@xmcl/runtime-api'
@@ -165,6 +172,7 @@ const slimToggle = computed({
 const { showOpenDialog, showSaveDialog } = windowController
 const isImportSkinDialogShown = ref(false)
 const isSkinLibraryDialogShown = ref(false)
+const isCapeLibraryDialogShown = ref(false)
 
 const onModelChange = (modelType: 'default' | 'slim') => {
   if (inferModelType.value) {

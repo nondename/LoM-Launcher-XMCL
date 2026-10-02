@@ -1,5 +1,5 @@
 import { AUTHORITY_MICROSOFT } from '@xmcl/runtime-api'
-import { ensureDir, mkdtemp, pathExists, readJson, rm, writeFile, writeJson } from 'fs-extra'
+import { ensureDir, mkdtemp, pathExists, readFile, readJson, rm, writeFile, writeJson } from 'fs-extra'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
@@ -65,6 +65,46 @@ describe('LocalSkinService', () => {
     await service.removeSkin(local.id)
     await expect(pathExists(localPath)).resolves.toBe(false)
     expect((await service.getState()).skins).toEqual([remote])
+  })
+
+  test('exports the equipped wardrobe skin into the launched instance', async () => {
+    const skin = await service.addSkin({ name: 'Launch Skin', source: 'https://example.com/skin.png', slim: true })
+    await service.setEquippedSkin('user-a:profile-a', skin.id)
+
+    const gameDirectory = join(appDataPath, 'instance')
+    const user = {
+      id: 'user-a',
+      authority: 'offline',
+      selectedProfile: 'profile-a',
+      profiles: {
+        'profile-a': {
+          id: '12345678123456781234567812345678',
+          name: 'LoMPlayer',
+        },
+      },
+    }
+
+    await service.prepareLaunchSkin(user as any, gameDirectory)
+
+    const runtimeDirectory = join(gameDirectory, '.lom', 'player')
+    await expect(readFile(join(runtimeDirectory, 'skin.png'))).resolves.toEqual(png)
+    await expect(readJson(join(runtimeDirectory, 'profile.json'))).resolves.toMatchObject({
+      schemaVersion: 1,
+      enabled: true,
+      accountId: 'user-a',
+      profileId: '12345678123456781234567812345678',
+      username: 'LoMPlayer',
+      authority: 'offline',
+      model: 'slim',
+    })
+
+    const profile = await readJson(join(runtimeDirectory, 'profile.json'))
+    expect(profile.sha256).toMatch(/^[a-f0-9]{64}$/)
+
+    await service.setEquippedSkin('user-a:profile-a', '')
+    await service.prepareLaunchSkin(user as any, gameDirectory)
+    await expect(pathExists(join(runtimeDirectory, 'skin.png'))).resolves.toBe(false)
+    await expect(pathExists(join(runtimeDirectory, 'profile.json'))).resolves.toBe(false)
   })
 
   test('migrates legacy remote skins into the closet', async () => {

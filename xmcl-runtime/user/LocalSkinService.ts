@@ -1,6 +1,6 @@
-import { AddLocalSkinOptions, AUTHORITY_MICROSOFT, LocalSkin, LocalSkinService as ILocalSkinService, LocalSkinServiceKey, LocalSkinState, ResolvedPlayerSkin, UpdateLocalSkinOptions } from '@xmcl/runtime-api'
+import { AddLocalSkinOptions, AUTHORITY_MICROSOFT, LocalSkin, LocalSkinService as ILocalSkinService, LocalSkinServiceKey, LocalSkinState, ResolvedPlayerSkin, UpdateLocalSkinOptions, type UserProfile } from '@xmcl/runtime-api'
 import { writeFile as writeAtomically } from 'atomically'
-import { randomUUID } from 'crypto'
+import { createHash, randomUUID } from 'crypto'
 import { copyFile, ensureDir, readFile, remove, writeFile } from 'fs-extra'
 import { isAbsolute, join, relative } from 'path'
 import { fileURLToPath } from 'url'
@@ -122,6 +122,64 @@ export class LocalSkinService extends AbstractService implements ILocalSkinServi
   async getState(): Promise<LocalSkinState> {
     await this.initialize()
     return structuredClone(this.state)
+  }
+
+  /**
+   * Export the skin explicitly equipped in the local wardrobe into the game
+   * directory. LoM-Skin-Loader reads only this fixed runtime location, so the
+   * mod never needs access to launcher-private paths.
+   *
+   * The runtime files are bound to both launcher account and Minecraft profile
+   * to prevent a stale skin from leaking between profiles that share an instance.
+   */
+  async prepareLaunchSkin(user: UserProfile, gameDirectory: string): Promise<void> {
+    await this.initialize()
+
+    const runtimeDirectory = join(gameDirectory, '.lom', 'player')
+    const runtimeSkin = join(runtimeDirectory, 'skin.png')
+    const runtimeProfile = join(runtimeDirectory, 'profile.json')
+    const clearRuntime = async () => {
+      await Promise.all([
+        remove(runtimeSkin),
+        remove(runtimeProfile),
+      ])
+    }
+
+    const selectedProfile = user.profiles[user.selectedProfile]
+    const equippedId = this.state.equippedSkinIds[`${user.id}:${user.selectedProfile}`]
+    const equippedSkin = equippedId ? this.state.skins.find(skin => skin.id === equippedId) : undefined
+    if (!selectedProfile || !equippedSkin) {
+      await clearRuntime()
+      return
+    }
+
+    const localSource = this.getLocalSource(equippedSkin.url)
+    if (!localSource) {
+      this.warn(`Equipped local skin ${equippedSkin.id} has no local source; clearing LoM runtime skin`)
+      await clearRuntime()
+      return
+    }
+
+    try {
+      const content = await readFile(localSource)
+      const sha256 = createHash('sha256').update(content).digest('hex')
+      await ensureDir(runtimeDirectory)
+      await writeFile(runtimeSkin, content)
+      await writeAtomically(runtimeProfile, JSON.stringify({
+        schemaVersion: 1,
+        enabled: true,
+        accountId: user.id,
+        profileId: selectedProfile.id,
+        username: selectedProfile.name,
+        authority: user.authority,
+        model: equippedSkin.slim ? 'slim' : 'default',
+        sha256,
+      }, null, 2))
+    } catch (e) {
+      this.warn(`Fail to prepare LoM runtime skin from ${localSource}`)
+      this.warn(e as Error)
+      await clearRuntime()
+    }
   }
 
   async resolveSkin(authority: string, username: string): Promise<ResolvedPlayerSkin> {
