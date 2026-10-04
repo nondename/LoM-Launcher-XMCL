@@ -20,9 +20,9 @@ import { basename, dirname, join } from 'path'
 import { promisify } from 'util'
 import { Logger } from '~/infra'
 import { kSettings } from '~/settings'
-import { checksum } from '~/util/fs'
 import ElectronLauncherApp from '../ElectronLauncherApp'
 import { ensureElevateExe } from './elevate'
+import { sha256Of } from './updateChecksum'
 import { buildUpdateBatScript } from './updateBat'
 
 const LOM_REPOSITORY = 'nondename/LoM-Launcher-XMCL'
@@ -125,8 +125,8 @@ async function downloadAsarUpdate(
     )
   }
 
-  const currentSha256 = await checksum(destination, 'sha256').catch(() => '')
-  if (currentSha256.toLowerCase() === expectedSha256) {
+  const currentSha256 = await sha256Of(destination)
+  if (currentSha256 && currentSha256 === expectedSha256) {
     return
   }
 
@@ -167,11 +167,13 @@ async function downloadAsarUpdate(
       await writeFile(tempFile, Buffer.from(await response.arrayBuffer()))
     }
 
-    const actualSha256 = (await checksum(tempFile, 'sha256')).toLowerCase()
+    const actualSha256 = await sha256Of(tempFile)
     if (actualSha256 !== expectedSha256) {
       throw new AnyError(
         'UpdateAsarError',
-        `SHA-256 mismatch for ${fileName}. Expected ${expectedSha256}, got ${actualSha256}`,
+        actualSha256
+          ? `SHA-256 mismatch for ${fileName}. Expected ${expectedSha256}, got ${actualSha256}`
+          : `Cannot read the downloaded LoM update asset: ${fileName}`,
       )
     }
 
