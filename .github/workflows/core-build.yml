@@ -9,6 +9,7 @@ on:
       - 'packages/*/package.json'
       - 'pnpm-lock.yaml'
       - '.github/**'
+  workflow_dispatch:
 
 jobs:
   automation:
