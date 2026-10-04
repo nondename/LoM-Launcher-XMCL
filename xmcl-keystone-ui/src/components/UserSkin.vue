@@ -49,7 +49,7 @@
       :height="300"
       :skin="skin"
       :slim="inferModelType ? undefined : slim"
-      :cape="cape"
+      :cape="displayCapeUrl"
       :name="''"
       :animation="hover ? 'running' : selected ? 'walking' : 'idle'"
       @model="onModelChange"
@@ -107,6 +107,7 @@
 import SkinView from '@/components/SkinView.vue'
 import UserSkinLibraryDialog from '@/components/UserSkinLibraryDialog.vue'
 import { getDropFilePaths } from '@/composables/dropHandler'
+import { useLocalCapeUrl } from '@/composables/userCapeLibrary'
 import { useUserSkinLibrary } from '@/composables/userSkinLibrary'
 import { vSharedTooltip } from '@/directives/sharedTooltip'
 import { GameProfileAndTexture, UserProfile } from '@xmcl/runtime-api'
@@ -169,6 +170,12 @@ const {
 )
 const paused = inject(UserSkinRenderPaused, () => ref(false), true)
 const pending = computed(() => loading.value)
+
+// Local wardrobe capes are what `prepareLaunchCape` exports to the game and what
+// the wardrobe preview renders; `cape` is the Mojang cape kept on the profile.
+// Only the first one is visible from the side panel without this.
+const localCapeUrl = useLocalCapeUrl(computed(() => props.user.id), gameProfile)
+const displayCapeUrl = computed(() => localCapeUrl.value || cape.value || '')
 
 const slimToggle = computed({
   get: () => slim.value,

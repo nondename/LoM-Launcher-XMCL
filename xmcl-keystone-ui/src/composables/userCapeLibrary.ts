@@ -1,7 +1,7 @@
 import { useService } from '@/composables'
-import { LocalCape, LocalCapeServiceKey } from '@xmcl/runtime-api'
+import { GameProfileAndTexture, LocalCape, LocalCapeServiceKey } from '@xmcl/runtime-api'
 import { createSharedComposable } from '@vueuse/core'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, Ref, ref } from 'vue'
 
 export type CapeLibraryItem = LocalCape
 
@@ -69,3 +69,39 @@ export const useUserCapeLibrary = createSharedComposable(() => {
     setEquippedCape,
   }
 })
+
+/**
+ * URL of the local wardrobe cape equipped for an account, or `''`.
+ *
+ * Equipping a cape only writes to `LocalCapeService.state.equippedCapeIds` — it
+ * never reaches `gameProfile.capes` / `gameProfile.textures.CAPE`. The launch
+ * pipeline (`prepareLaunchCape`) and the wardrobe preview both read that state,
+ * so anything rendering the player from the game profile alone shows a bare back.
+ *
+ * @param userId The `UserProfile.id` the cape is equipped for.
+ * @param gameProfile The game profile its cape is keyed by (`${user.id}:${profile.id}`).
+ */
+export function useLocalCapeUrl(userId: Ref<string>, gameProfile: Ref<GameProfileAndTexture | undefined>) {
+  const { capes, equippedCapeIds } = useUserCapeLibrary()
+  return computed(() => {
+    const profileId = gameProfile.value?.id
+    return profileId ? resolveLocalCapeUrl({ capes: capes.value, equippedCapeIds: equippedCapeIds.value }, userId.value, profileId) : ''
+  })
+}
+
+/**
+ * Look up the equipped cape URL.
+ *
+ * The `${userId}:${profileId}` account key is duplicated by
+ * `LocalCapeService.prepareLaunchCape` (what the game gets) and by both wardrobe
+ * dialogs (what the preview shows); it is the only link between them.
+ */
+export function resolveLocalCapeUrl(
+  library: { capes: CapeLibraryItem[], equippedCapeIds: Record<string, string> },
+  userId: string,
+  profileId: string,
+): string {
+  const capeId = library.equippedCapeIds[`${userId}:${profileId}`]
+  if (!capeId) return ''
+  return library.capes.find((cape) => cape.id === capeId)?.url || ''
+}
