@@ -2,6 +2,8 @@ import { InstanceInstallStatus } from '@xmcl/runtime-api'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, ref, shallowRef, triggerRef } from 'vue'
 import { LaunchMenuItemIssue, useInstanceLaunchMenuItems } from './instanceLaunchMenuItems'
+import type { InstanceJavaIssue } from './instanceJavaDiagnose'
+import type { InstanceInstallInstruction } from './instanceVersionInstall'
 
 const { installJava, refreshJava } = vi.hoisted(() => ({
   installJava: vi.fn(),
@@ -22,13 +24,13 @@ vi.mock('@/util/inject', () => ({ injection: () => context }))
 const status = shallowRef(new InstanceInstallStatus())
 const context = {
   path: ref('instance'),
-  instruction: ref(undefined),
+  instruction: ref<InstanceInstallInstruction | undefined>(undefined),
   instanceInstallStatus: status,
   resumeInstall: vi.fn(),
   isResumingInstall: () => false,
   isValidating: ref(false),
   unzipFileNotFound: ref(undefined),
-  issue: ref(undefined),
+  issue: ref<InstanceJavaIssue | undefined>(undefined),
   refresh: refreshJava,
 }
 
