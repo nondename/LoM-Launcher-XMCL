@@ -23,6 +23,7 @@ import { kSettings } from '~/settings'
 import { checksum } from '~/util/fs'
 import ElectronLauncherApp from '../ElectronLauncherApp'
 import { ensureElevateExe } from './elevate'
+import { buildUpdateBatScript } from './updateBat'
 
 const LOM_REPOSITORY = 'nondename/LoM-Launcher-XMCL'
 const LOM_RELEASES_URL = `https://github.com/${LOM_REPOSITORY}/releases`
@@ -186,6 +187,10 @@ async function hintUserDownload(): Promise<void> {
   await shell.openExternal(LOM_RELEASES_URL)
 }
 
+/**
+ * Build the Windows batch script that swaps `app.asar` while the launcher is
+ * down. See `./updateBat` for the implementation and its unit tests.
+ */
 async function getUpdateAsarViaBatArgs(
   appAsarPath: string,
   updateAsarPath: string,
@@ -193,17 +198,13 @@ async function getUpdateAsarViaBatArgs(
   elevatePath?: string,
 ): Promise<string[]> {
   const batPath = join(appDataPath, 'AutoUpdate.bat')
-  await writeFile(
-    batPath,
-    [
-      '@echo off',
-      'chcp 65001',
-      '%WinDir%\\System32\\timeout.exe 2',
-      `taskkill /f /im "${basename(process.argv[0])}"`,
-      `copy /Y "${updateAsarPath}" "${appAsarPath}"`,
-      `start /b "" /d "${process.cwd()}" ${process.argv.map((s) => `"${s}"`).join(' ')}`,
-    ].join('\r\n'),
-  )
+  await writeFile(batPath, buildUpdateBatScript({
+    appAsarPath,
+    updateAsarPath,
+    relaunchCwd: process.cwd(),
+    relaunchArgv: process.argv,
+    exeName: basename(process.argv[0]),
+  }))
 
   return elevatePath ? [elevatePath, batPath] : ['cmd.exe', '/c', batPath]
 }
@@ -297,19 +298,21 @@ export class ElectronUpdater implements LauncherAppUpdater {
 
     if (this.app.platform.os === 'windows') {
       const elevatePath = await ensureElevateExe(this.app.appDataPath)
+      // Probe the install directory itself (not app.asar): the bat stages and
+      // backs up files next to app.asar, so directory write access is what the
+      // swap actually needs. Per-user NSIS installs live in %LOCALAPPDATA% and
+      // pass this check, so they update without a UAC prompt.
+      const probePath = join(dirname(appAsarPath), '.lom-update-probe')
       let hasWriteAccess = await new Promise<boolean>((resolve) => {
-        open(appAsarPath, 'a', (error, fd) => {
+        open(probePath, 'w', (error, fd) => {
           if (error) {
             resolve(false)
           } else {
             closeSync(fd)
-            resolve(true)
+            unlink(probePath, () => resolve(true))
           }
         })
       })
-
-      // Keep the existing safe behaviour: replace app.asar from an elevated helper.
-      hasWriteAccess = false
       const args = await getUpdateAsarViaBatArgs(
         appAsarPath,
         updateAsarPath,
