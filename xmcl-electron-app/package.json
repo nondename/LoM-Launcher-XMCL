@@ -17,6 +17,7 @@
     "scripts": {
         "compile": "cross-env BUILD_TARGET=none tsx build.ts",
         "build": "cross-env NODE_ENV=production tsx build.ts",
+        "build:installer": "cross-env NODE_ENV=production tsx build-installer.ts",
         "build:all": "cross-env NODE_ENV=production cross-env BUILD_TARGET=all tsx build.ts",
         "postinstall": "tsx postinstall.ts",
         "postsign": "tsx postsign.ts",

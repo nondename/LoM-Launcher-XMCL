@@ -1347,6 +1347,10 @@ setting:
     warningColor: Цвет предупреждения
   darkTheme: Тема
   darkThemeDescription: Выберите тёмную или светлую тему.
+  devChannel: Канал обновлений DEV
+  devChannelDescription: >-
+    Получайте предварительные сборки лаунчера раньше, чем они станут
+    стабильными. Включайте, только если готовы к периодическим сбоям.
   devModeLabel: РАЗРАБОТКА
   developerMode: Режим разработчика
   developerModeDescription: Эта опция предназначена для тестирования ваших собственных модов.

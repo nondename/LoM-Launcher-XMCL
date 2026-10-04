@@ -20,8 +20,8 @@ export const config = {
   // set this to your own repo!
   publish: [{
     provider: 'github',
-    owner: 'voxelum',
-    repo: 'x-minecraft-launcher',
+    owner: 'nondename',
+    repo: 'LoM-Launcher-XMCL',
   }],
   files: [{
     from: 'dist',
@@ -38,6 +38,23 @@ export const config = {
     filter: ['**/*.md'],
   }],
   artifactName: 'xmcl-${version}-${platform}-${arch}.${ext}',
+  nsis: {
+    // Per-user install into %LOCALAPPDATA%\Programs: no UAC prompt, no
+    // leftovers in Program Files, and the in-app updater can rewrite
+    // app.asar without an elevated helper.
+    perMachine: false,
+    oneClick: false,
+    allowToChangeInstallationDirectory: true,
+    createDesktopShortcut: true,
+    createStartMenuShortcut: true,
+    shortcutName: 'LoM Launcher',
+    uninstallDisplayName: 'LoM Launcher',
+    deleteAppDataOnUninstall: false,
+    // The launcher swaps app.asar itself; the NSIS blockmap/differential
+    // package would only add dead weight to the release assets.
+    differentialPackage: false,
+    artifactName: 'LoM-Launcher-Setup-${version}-${arch}.${ext}',
+  },
   appx: {
     displayName: 'LoM Launcher',
     applicationId: 'lomlauncher',
