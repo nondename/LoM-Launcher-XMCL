@@ -19,6 +19,18 @@ describe('LocalSkinService', () => {
   let service: InstanceType<typeof LocalSkinService>
   let yggdrasilRegistry: { getYggdrasilServices: ReturnType<typeof vi.fn> }
 
+  const user = {
+    id: 'user-a',
+    authority: 'offline',
+    selectedProfile: 'profile-a',
+    profiles: {
+      'profile-a': {
+        id: '12345678123456781234567812345678',
+        name: 'LoMPlayer',
+      },
+    },
+  }
+
   beforeEach(async () => {
     appDataPath = await mkdtemp(join(tmpdir(), 'xmcl-local-skin-'))
     const logger = { log: vi.fn(), warn: vi.fn(), error: vi.fn() }
@@ -72,17 +84,6 @@ describe('LocalSkinService', () => {
     await service.setEquippedSkin('user-a:profile-a', skin.id)
 
     const gameDirectory = join(appDataPath, 'instance')
-    const user = {
-      id: 'user-a',
-      authority: 'offline',
-      selectedProfile: 'profile-a',
-      profiles: {
-        'profile-a': {
-          id: '12345678123456781234567812345678',
-          name: 'LoMPlayer',
-        },
-      },
-    }
 
     await service.prepareLaunchSkin(user as any, gameDirectory)
 
@@ -105,6 +106,54 @@ describe('LocalSkinService', () => {
     await service.prepareLaunchSkin(user as any, gameDirectory)
     await expect(pathExists(join(runtimeDirectory, 'skin.png'))).resolves.toBe(false)
     await expect(pathExists(join(runtimeDirectory, 'profile.json'))).resolves.toBe(false)
+  })
+
+  test('keeps cape fields of the shared profile when clearing the skin', async () => {
+    const gameDirectory = join(appDataPath, 'instance')
+    const runtimeDirectory = join(gameDirectory, '.lom', 'player')
+    await ensureDir(runtimeDirectory)
+    await writeFile(join(runtimeDirectory, 'cape.png'), png)
+    await writeJson(join(runtimeDirectory, 'profile.json'), {
+      schemaVersion: 1,
+      enabled: true,
+      accountId: 'user-a',
+      capeSha256: 'c'.repeat(64),
+    })
+
+    await service.prepareLaunchSkin(user as any, gameDirectory)
+
+    await expect(pathExists(join(runtimeDirectory, 'skin.png'))).resolves.toBe(false)
+    await expect(readJson(join(runtimeDirectory, 'profile.json'))).resolves.toEqual({
+      schemaVersion: 1,
+      enabled: true,
+      accountId: 'user-a',
+      capeSha256: 'c'.repeat(64),
+    })
+  })
+
+  test('merges the skin into an existing cape profile without dropping capeSha256', async () => {
+    const skin = await service.addSkin({ name: 'Merge Skin', source: 'https://example.com/skin.png', slim: true })
+    await service.setEquippedSkin('user-a:profile-a', skin.id)
+
+    const gameDirectory = join(appDataPath, 'instance')
+    const runtimeDirectory = join(gameDirectory, '.lom', 'player')
+    await ensureDir(runtimeDirectory)
+    await writeJson(join(runtimeDirectory, 'profile.json'), {
+      schemaVersion: 1,
+      enabled: true,
+      accountId: 'user-a',
+      capeSha256: 'c'.repeat(64),
+    })
+
+    await service.prepareLaunchSkin(user as any, gameDirectory)
+
+    await expect(readJson(join(runtimeDirectory, 'profile.json'))).resolves.toMatchObject({
+      model: 'slim',
+      capeSha256: 'c'.repeat(64),
+      username: 'LoMPlayer',
+    })
+    const profile = await readJson(join(runtimeDirectory, 'profile.json'))
+    expect(profile.sha256).toMatch(/^[a-f0-9]{64}$/)
   })
 
   test('migrates legacy remote skins into the closet', async () => {

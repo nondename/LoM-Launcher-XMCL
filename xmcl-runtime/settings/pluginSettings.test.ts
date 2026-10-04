@@ -92,7 +92,7 @@ describe('pluginSettings', () => {
     expect(fsExtra.readJson).toHaveBeenCalledWith(join('/mock/app/data', 'setting.json'))
   })
 
-  test('should use host locale when no locale is set', async () => {
+  test('should fall back to "ru" when no locale is set', async () => {
     vi.mocked(fsExtra.readJson).mockResolvedValue({})
 
     const { pluginSettings } = await import('./pluginSettings')
@@ -102,7 +102,10 @@ describe('pluginSettings', () => {
       expect(mockApp.registry.register).toHaveBeenCalled()
     })
 
-    expect(mockApp.host.getLocale).toHaveBeenCalled()
+    // The launcher defaults new users to Russian instead of probing the
+    // host locale, so the locale must be resolved purely from setting.json.
+    expect(mockState.locale).toBe('ru')
+    expect(mockApp.host.getLocale).not.toHaveBeenCalled()
   })
 
   test('should normalize English locale to "en"', async () => {
@@ -129,8 +132,8 @@ describe('pluginSettings', () => {
       expect(mockApp.registry.register).toHaveBeenCalled()
     })
     
-    // Verify settings are initialized with defaults (locale normalized to 'en' from 'en-US')
-    expect(mockState.locale).toBe('en')
+    // Verify settings are initialized with defaults (empty locale falls back to 'ru')
+    expect(mockState.locale).toBe('ru')
     expect(mockState.theme).toBe('dark')
     expect(mockState.developerMode).toBe(false)
     expect(mockState.autoDownload).toBe(false)
@@ -237,7 +240,7 @@ describe('pluginSettings', () => {
   test('should re-normalize malformed setting json to valid settings object', async () => {
     // Malformed settings with wrong types - zod will coerce or use defaults
     vi.mocked(fsExtra.readJson).mockResolvedValue({
-      locale: '', // empty locale will use host locale
+      locale: '', // empty locale falls back to the default 'ru'
       autoDownload: false,
       theme: 'dark',
       maxSockets: 32,
@@ -252,8 +255,8 @@ describe('pluginSettings', () => {
       expect(mockApp.registry.register).toHaveBeenCalled()
     })
 
-    // Verify settings are normalized - locale normalized from host locale
-    expect(mockState.locale).toBe('en') // normalized from host locale 'en-US'
+    // Verify settings are normalized - empty locale falls back to the default
+    expect(mockState.locale).toBe('ru')
     expect(mockState.theme).toBe('dark')
     expect(mockState.autoDownload).toBe(false)
     expect(mockState.maxSockets).toBe(32) // value from file
@@ -284,8 +287,8 @@ describe('pluginSettings', () => {
     expect(mockState.maxSockets).toBe(128) // valid value from file
     expect(mockState.httpProxy).toBe('http://proxy.example.com') // valid value from file
 
-    // Invalid fields should use defaults (locale normalized from host)
-    expect(mockState.locale).toBe('en') // default normalized from host locale
+    // Invalid fields should use defaults (empty locale falls back to 'ru')
+    expect(mockState.locale).toBe('ru') // default value
     expect(mockState.developerMode).toBe(false) // default value
   })
 
@@ -305,7 +308,7 @@ describe('pluginSettings', () => {
 
     // Invalid fields use defaults, but settings are still normalized
     // Settings are initialized with normalized defaults
-    expect(mockState.locale).toBe('en') // normalized from host locale
+    expect(mockState.locale).toBe('ru') // default value (invalid value was rejected)
     expect(mockState.theme).toBe('dark') // default value (invalid value was rejected)
     expect(mockState.developerMode).toBe(false)
   })
@@ -334,7 +337,7 @@ describe('pluginSettings', () => {
     expect(fsExtra.writeJson).toHaveBeenCalledWith(
       join('/mock/app/data', 'setting.json'),
       {
-        locale: 'en',
+        locale: 'ru',
         autoDownload: false,
         autoInstallOnAppQuit: false,
         allowPrerelease: false,
@@ -405,7 +408,7 @@ describe('pluginSettings', () => {
     expect(fsExtra.writeJson).toHaveBeenCalledWith(
       join('/mock/app/data', 'setting.json'),
       {
-        locale: 'en',
+        locale: 'ru',
         autoDownload: false,
         autoInstallOnAppQuit: false,
         allowPrerelease: false,

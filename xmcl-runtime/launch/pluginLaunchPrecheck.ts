@@ -17,6 +17,7 @@ import { isLinkTo, readlinkSafe } from '~/instance/utils/readLinkSafe'
 import { getManagedJavaComponent, JavaService, JavaValidation } from '~/java'
 import { LaunchService } from '~/launch'
 import { PeerService } from '~/peer'
+import { LocalCapeService } from '~/user/LocalCapeService'
 import { LocalSkinService } from '~/user/LocalSkinService'
 import { linkOrCopyDirectory, missing } from '~/util/fs'
 
@@ -32,6 +33,17 @@ export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
       if (payload.side !== 'client') return
       const localSkinService = await app.registry.getOrCreate(LocalSkinService)
       await localSkinService.prepareLaunchSkin(input.user, input.gameDirectory)
+    },
+  })
+
+  // Registered here (not in LocalCapeService's constructor) so the middleware is
+  // always present when launching, regardless of when the service is instantiated.
+  launchService.registerMiddleware({
+    name: 'lom-local-cape',
+    async onBeforeLaunch(input, payload) {
+      if (payload.side !== 'client') return
+      const localCapeService = await app.registry.getOrCreate(LocalCapeService)
+      await localCapeService.prepareLaunchCape(input.user, input.gameDirectory)
     },
   })
 

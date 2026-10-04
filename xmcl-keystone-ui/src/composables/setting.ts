@@ -45,8 +45,22 @@ export function useUpdateSettings() {
     }
   }
 
+  /**
+   * Update channel: `false` tracks the stable releases, `true` opts into the
+   * DEV channel, which also picks up GitHub pre-releases.
+   */
+  const devChannel = computed({
+    get: () => state.value?.allowPrerelease ?? false,
+    set: (v) => { state.value?.allowPrereleaseSet(v) },
+  })
+
+  // Re-query the feed right after the channel changes so the newly reachable
+  // release shows up without pressing "Check Update" again.
+  watch(devChannel, () => { void check() })
+
   return {
     version,
+    devChannel,
     quitAndInstall: install,
     downloadUpdate: download,
     checkUpdate: check,

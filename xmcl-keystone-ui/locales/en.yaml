@@ -2018,6 +2018,10 @@ setting:
       when pasting CSS from untrusted sources, as it can modify the UI layout.
   darkTheme: Theme
   darkThemeDescription: Choose between dark or light theme
+  devChannel: DEV Update Channel
+  devChannelDescription: >-
+    Get pre-release builds of the launcher before they become stable. Only
+    enable this if you are okay with occasional breakage.
   devModeLabel: DEV
   developerMode: Developer Mode
   developerModeDescription: Developer Mode is for testing your own mods

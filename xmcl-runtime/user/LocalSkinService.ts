@@ -1,7 +1,7 @@
 import { AddLocalSkinOptions, AUTHORITY_MICROSOFT, LocalSkin, LocalSkinService as ILocalSkinService, LocalSkinServiceKey, LocalSkinState, ResolvedPlayerSkin, UpdateLocalSkinOptions, type UserProfile } from '@xmcl/runtime-api'
 import { writeFile as writeAtomically } from 'atomically'
 import { createHash, randomUUID } from 'crypto'
-import { copyFile, ensureDir, readFile, remove, writeFile } from 'fs-extra'
+import { copyFile, ensureDir, pathExists, readFile, remove, writeFile } from 'fs-extra'
 import { isAbsolute, join, relative } from 'path'
 import { fileURLToPath } from 'url'
 import { Inject, LauncherApp, LauncherAppKey } from '~/app'
@@ -138,11 +138,28 @@ export class LocalSkinService extends AbstractService implements ILocalSkinServi
     const runtimeDirectory = join(gameDirectory, '.lom', 'player')
     const runtimeSkin = join(runtimeDirectory, 'skin.png')
     const runtimeProfile = join(runtimeDirectory, 'profile.json')
+
+    const readProfile = async (): Promise<Record<string, unknown>> => {
+      try {
+        return JSON.parse(await readFile(runtimeProfile, 'utf-8')) as Record<string, unknown>
+      } catch {
+        return {}
+      }
+    }
+
+    // Only drop the skin keys so the cape half of the profile survives
+    // (profile.json is shared between LocalSkinService and LocalCapeService).
     const clearRuntime = async () => {
-      await Promise.all([
-        remove(runtimeSkin),
-        remove(runtimeProfile),
-      ])
+      await remove(runtimeSkin)
+      if (!(await pathExists(runtimeProfile))) return
+      const profile = await readProfile()
+      delete profile.sha256
+      delete profile.model
+      if (!(await pathExists(join(runtimeDirectory, 'cape.png')))) {
+        await remove(runtimeProfile)
+      } else {
+        await writeAtomically(runtimeProfile, JSON.stringify(profile, null, 2))
+      }
     }
 
     const selectedProfile = user.profiles[user.selectedProfile]
@@ -165,7 +182,9 @@ export class LocalSkinService extends AbstractService implements ILocalSkinServi
       const sha256 = createHash('sha256').update(content).digest('hex')
       await ensureDir(runtimeDirectory)
       await writeFile(runtimeSkin, content)
+      const existing = await readProfile()
       await writeAtomically(runtimeProfile, JSON.stringify({
+        ...existing,
         schemaVersion: 1,
         enabled: true,
         accountId: user.id,

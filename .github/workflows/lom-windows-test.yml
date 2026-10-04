@@ -152,6 +152,15 @@ jobs:
             throw 'LoM Launcher.exe is missing from Windows build'
           }
 
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          pnpm run --prefix xmcl-electron-app build:installer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Get-ChildItem 'xmcl-electron-app/build/output/LoM-Launcher-Setup-*.exe' -ErrorAction SilentlyContinue)) {
+            throw 'NSIS installer was not produced'
+          }
+
       - name: Upload Windows unpacked build
         uses: actions/upload-artifact@v6
         with:
@@ -159,3 +168,13 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           path: xmcl-electron-app/build/output/win-unpacked/
+
+      - name: Upload Windows installer
+        uses: actions/upload-artifact@v6
+        with:
+          name: lom-windows-installer-b${{ github.run_number }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            xmcl-electron-app/build/output/LoM-Launcher-Setup-*.exe
+            xmcl-electron-app/build/output/LoM-Launcher-Setup-*.exe.sha256

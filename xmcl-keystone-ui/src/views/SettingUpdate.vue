@@ -57,6 +57,15 @@
         </v-btn>
       </template>
     </SettingItem>
+
+    <v-divider class="my-3" />
+    <SettingItemSwitcher
+      v-model="devChannel"
+      data-testid="settings-dev-channel"
+      :title="t('setting.devChannel')"
+      :description="t('setting.devChannelDescription')"
+      icon="science"
+    />
   </SettingCard>
 </template>
 
@@ -69,10 +78,11 @@ import { useDialog } from '../composables/dialog'
 import { kUpdateSettings } from '../composables/setting'
 import SettingCard from '@/components/SettingCard.vue'
 import SettingItem from '@/components/SettingItem.vue'
+import SettingItemSwitcher from '@/components/SettingItemSwitcher.vue'
 
 const { show: showUpdateInfo } = useDialog('update-info')
 const disableUpdate = false // state.env !== 'raw'
-const { updateInfo, installing, updateStatus, checkUpdate, checkingUpdate, version } = injection(kUpdateSettings)
+const { updateInfo, installing, updateStatus, checkUpdate, checkingUpdate, version, devChannel } = injection(kUpdateSettings)
 const hasNewUpdate = computed(() => updateStatus.value !== 'none' && !!updateInfo.value?.newUpdate)
 const { t } = useI18n()
 
