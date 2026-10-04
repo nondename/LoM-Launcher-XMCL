@@ -5,7 +5,6 @@ import { copyFile, ensureDir, pathExists, readFile, remove, writeFile } from 'fs
 import { isAbsolute, join, relative } from 'path'
 import { fileURLToPath } from 'url'
 import { Inject, LauncherApp, LauncherAppKey } from '~/app'
-import { LaunchService } from '~/launch'
 import { AbstractService, ExposeServiceKey } from '~/service'
 
 const LOCAL_CAPE_LOCK = 'local-cape-service'
@@ -23,20 +22,6 @@ export class LocalCapeService extends AbstractService implements ILocalCapeServi
     })
     this.closetPath = this.getAppDataPath('cape-closet')
     this.statePath = join(this.closetPath, 'index.json')
-
-    const service = this
-    void app.registry.get(LaunchService).then((launchService) => {
-      launchService.registerMiddleware({
-        name: 'lom-local-cape',
-        async onBeforeLaunch(input, payload) {
-          if (payload.side !== 'client') return
-          await service.prepareLaunchCape(input.user, input.gameDirectory)
-        },
-      })
-    }).catch((e) => {
-      this.warn('Fail to register LoM local cape launch middleware')
-      this.warn(e as Error)
-    })
   }
 
   private async loadState(): Promise<LocalCapeState> {
