@@ -1276,7 +1276,7 @@ setting:
     loadConfirmTitle: Заменить текущую тему?
     loadConfirmMessage: Загрузка сохранённой темы заменит текущую. При необходимости сделайте резервную копию.
     loadTheme: Загрузить тему
-  about: О
+  about: О лаунчере
   aboutBmclDescription: BMCL API предоставляет удобные загрузки для пользователей материка
   aboutContributors: 🧑‍💻 Участники 🧑‍💻
   aboutDenoDescription: XMCL использует серверную платформу Deno Deploy для приложений JavaScript
@@ -1470,6 +1470,7 @@ setting:
   themeShare: Поделиться темой
   themeShareDescription: Вы можете поделиться темой с вашим другом.
   update: Обновить
+  updateSection: Обновление
   useBmclAPI: Использовать BMCL API
   useBmclAPIDescription: Скачайте Minecraft в Китае с помощью BMCL-API
   useProxy: HTTP-прокси

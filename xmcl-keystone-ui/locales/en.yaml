@@ -2164,6 +2164,7 @@ setting:
     themeName: Theme Name
     themeNameHint: Name used to store this theme
   update: Update
+  updateSection: Update
   useBmclAPI: Use BMCL API
   useBmclAPIDescription: >-
     Use BMCLAPI to download Minecraft when you are in Chinese Mainland. (This

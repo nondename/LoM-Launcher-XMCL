@@ -85,9 +85,9 @@
           />
           <SettingNetwork />
         </section>
-        <section id="about" class="mb-12 scroll-target" role="region" :aria-label="t('setting.about')">
+        <section id="about" class="mb-12 scroll-target" role="region" :aria-label="t('setting.updateSection')">
           <SettingHeader
-            :title="t('setting.about')"
+            :title="t('setting.updateSection')"
             icon="info"
           />
           <SettingUpdate class="mb-4" />
@@ -153,7 +153,7 @@ const sections = [
   { id: 'appearance', title: 'setting.appearance', icon: 'palette' },
   { id: 'global', title: 'setting.globalSetting', icon: 'videogame_asset' },
   { id: 'network', title: 'setting.network', icon: 'wifi' },
-  { id: 'about', title: 'setting.about', icon: 'info' },
+  { id: 'about', title: 'setting.updateSection', icon: 'info' },
 ]
 
 async function revealRouteTarget() {
