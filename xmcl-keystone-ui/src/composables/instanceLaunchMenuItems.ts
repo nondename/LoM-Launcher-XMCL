@@ -1,12 +1,16 @@
 import { injection } from '@/util/inject'
 import { getCurrentInstanceState } from '@/util/instanceLaunchState'
-import { getExpectVersion } from '@xmcl/runtime-api'
+import { getExpectVersion, VersionInstallServiceKey } from '@xmcl/runtime-api'
 import { useDialog } from './dialog'
 import { kInstance } from './instance'
 import { kInstanceFiles } from './instanceFiles'
+import { kInstanceJavaDiagnose } from './instanceJavaDiagnose'
+import { kJavaContext } from './java'
 import { UnresolvedFilesDialogKey } from './instanceUpdate'
 import { LaunchMenuItem } from './launchButton'
+import { LaunchStatusDialogKey } from './launch'
 import { kInstanceVersionInstall } from './instanceVersionInstall'
+import { useService } from './service'
 import type { RendererActionScope } from '@/rendererAction'
 
 export const enum LaunchMenuItemIssue {
@@ -30,7 +34,11 @@ export function useInstanceLaunchMenuItems() {
   const { t } = useI18n()
   const { path } = injection(kInstance)
   const { instruction } = injection(kInstanceVersionInstall)
+  const { issue: javaIssue } = injection(kInstanceJavaDiagnose)
+  const { refresh: refreshJavaList } = injection(kJavaContext)
+  const versionInstallService = useService(VersionInstallServiceKey)
   const { show: showUnresolvedFilesDialog } = useDialog(UnresolvedFilesDialogKey)
+  const { show: showLaunchStatusDialog } = useDialog(LaunchStatusDialogKey)
   const {
     instanceInstallStatus,
     resumeInstall,
@@ -179,6 +187,21 @@ export function useInstanceLaunchMenuItems() {
       items.push({
         title: t('diagnosis.missingJava.name'),
         description: t('diagnosis.missingJava.message'),
+        onClick: async () => {
+          const required = installInstruction.java
+          if (required) {
+            try {
+              await versionInstallService.install({ type: 'java', target: required })
+              await refreshJavaList(true)
+              return
+            } catch {
+              // fall through to the dialog below
+            }
+          }
+          if (javaIssue.value) {
+            showLaunchStatusDialog({ javaIssue: javaIssue.value })
+          }
+        },
       })
     }
     if (flags & LaunchMenuItemIssue.BadProfile) {

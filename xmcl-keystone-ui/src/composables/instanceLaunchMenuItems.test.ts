@@ -3,10 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, ref, shallowRef, triggerRef } from 'vue'
 import { LaunchMenuItemIssue, useInstanceLaunchMenuItems } from './instanceLaunchMenuItems'
 
+const { installJava, refreshJava } = vi.hoisted(() => ({
+  installJava: vi.fn(),
+  refreshJava: vi.fn(),
+}))
+
 vi.mock('./instance', () => ({ kInstance: Symbol('instance') }))
 vi.mock('./instanceFiles', () => ({ kInstanceFiles: Symbol('files') }))
 vi.mock('./instanceVersionInstall', () => ({ kInstanceVersionInstall: Symbol('version') }))
+vi.mock('./instanceJavaDiagnose', () => ({ kInstanceJavaDiagnose: Symbol('javaDiagnose') }))
+vi.mock('./java', () => ({ kJavaContext: Symbol('java') }))
+vi.mock('./service', () => ({ useService: () => ({ install: installJava }) }))
 vi.mock('./instanceUpdate', () => ({ UnresolvedFilesDialogKey: 'unresolved' }))
+vi.mock('./launch', () => ({ LaunchStatusDialogKey: 'launch-status' }))
 vi.mock('./dialog', () => ({ useDialog: () => ({ show: vi.fn() }) }))
 vi.mock('@/util/inject', () => ({ injection: () => context }))
 
@@ -19,6 +28,8 @@ const context = {
   isResumingInstall: () => false,
   isValidating: ref(false),
   unzipFileNotFound: ref(undefined),
+  issue: ref(undefined),
+  refresh: refreshJava,
 }
 
 describe('instance launch pending files', () => {
@@ -93,5 +104,56 @@ describe('instance launch pending files', () => {
     status.value.instance = 'other-instance'
     triggerRef(status)
     expect(menu.issues.value & LaunchMenuItemIssue.PendingFiles).toBeTruthy()
+  })
+})
+
+describe('instance launch missing java', () => {
+  const requiredJava = { component: 'java-runtime-gamma', majorVersion: 17 }
+
+  beforeEach(() => {
+    vi.stubGlobal('computed', computed)
+    vi.stubGlobal('useI18n', () => ({
+      t: (key: string, options?: unknown) => options ? `${key}:${JSON.stringify(options)}` : key,
+    }))
+    context.path.value = 'instance'
+    context.issue.value = 'missing'
+    context.instruction.value = {
+      instance: 'instance',
+      runtime: { minecraft: '1.20.1' },
+      version: '1.20.1',
+      java: requiredJava,
+    }
+    installJava.mockResolvedValue({ path: '/java/17', version: '17.0.1', majorVersion: 17 })
+    refreshJava.mockResolvedValue(undefined)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.clearAllMocks()
+  })
+
+  it('auto-installs the required java when the missing-java item is clicked', async () => {
+    const menu = useInstanceLaunchMenuItems()
+    expect(menu.issues.value & LaunchMenuItemIssue.MissingJava).toBeTruthy()
+
+    const item = menu.launchMenuItems.value.find((i) => i.title === 'diagnosis.missingJava.name')
+    expect(item).toBeTruthy()
+    expect(item?.onClick).toBeTruthy()
+
+    await item?.onClick?.()
+
+    expect(installJava).toHaveBeenCalledWith({ type: 'java', target: requiredJava })
+    expect(refreshJava).toHaveBeenCalledWith(true)
+  })
+
+  it('falls back to the launch status dialog when the java install fails', async () => {
+    installJava.mockRejectedValue(new Error('download failed'))
+    const menu = useInstanceLaunchMenuItems()
+
+    const item = menu.launchMenuItems.value.find((i) => i.title === 'diagnosis.missingJava.name')
+    await item?.onClick?.()
+
+    expect(installJava).toHaveBeenCalledWith({ type: 'java', target: requiredJava })
+    expect(refreshJava).not.toHaveBeenCalled()
   })
 })
