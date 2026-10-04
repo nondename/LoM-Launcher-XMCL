@@ -1,6 +1,6 @@
 {
-    "channel": "dev",
-    "version": "0.1.8",
+    "channel": "stable",
+    "version": "1.8.2",
     "releasedAt": "2026-10-04",
     "inAppUpdate": true
 }
