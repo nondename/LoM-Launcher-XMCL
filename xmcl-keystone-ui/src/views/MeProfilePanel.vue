@@ -296,7 +296,6 @@
 <script lang="ts" setup>
 import MinecraftFriendRow from '@/components/MinecraftFriendRow.vue'
 import PlayerCape from '@/components/PlayerCape.vue'
-import SkinView from '@/components/SkinView.vue'
 import UserAccountSwitcher from '@/components/UserAccountSwitcher.vue'
 import UserSkin from '@/components/UserSkin.vue'
 import UserSkinLibraryDialog from '@/components/UserSkinLibraryDialog.vue'

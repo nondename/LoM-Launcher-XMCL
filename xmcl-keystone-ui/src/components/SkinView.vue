@@ -24,7 +24,9 @@ const props = withDefaults(defineProps<{
   height: 400,
   slim: undefined,
   cape: undefined,
-  name: 'Steve',
+  // No nametag by default: it is opt-in, so an omitted `name` must not render
+  // a placeholder label above the model.
+  name: '',
   skin: '',
   animation: 'idle',
   rotationY: 0,

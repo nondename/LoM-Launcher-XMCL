@@ -50,7 +50,7 @@
       :skin="skin"
       :slim="inferModelType ? undefined : slim"
       :cape="cape"
-      :name="name"
+      :name="''"
       :animation="hover ? 'running' : selected ? 'walking' : 'idle'"
       @model="onModelChange"
       @error="onPreviewError"
