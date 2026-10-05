@@ -1,17 +1,13 @@
 import { injection } from '@/util/inject'
 import { isBedrockInstance } from '@xmcl/instance'
 import { XUpdateServiceKey, type LoMUpdateProgress, type LoMUpdateStatus } from '@xmcl/runtime-api'
+import { useLocalStorage } from '@vueuse/core'
 import { kInstance } from './instance'
-import { isLoMProfile } from './lomProfile'
+import { isLoMProfile, isManagedLoMProfile, LOM_COLD_START_PENDING_KEY, LOM_MANAGED_INSTANCE_PATHS_KEY } from './lomProfile'
 import { useService } from './service'
 
 const idleProgress = (): LoMUpdateProgress => ({
-  phase: 'idle',
-  filesDone: 0,
-  filesTotal: 0,
-  bytesDone: 0,
-  bytesTotal: 0,
-  bytesPerSecond: 0,
+  phase: 'idle', filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0,
 })
 
 let sharedLomUpdate: ReturnType<typeof createLomUpdate> | undefined
@@ -19,6 +15,8 @@ let sharedLomUpdate: ReturnType<typeof createLomUpdate> | undefined
 function createLomUpdate() {
   const { path, instance } = injection(kInstance)
   const { checkLoMUpdate, applyLoMUpdate, cancelLoMUpdate, getLoMUpdateProgress } = useService(XUpdateServiceKey)
+  const managedPaths = useLocalStorage<string[]>(LOM_MANAGED_INSTANCE_PATHS_KEY, [])
+  const pendingPath = useLocalStorage(LOM_COLD_START_PENDING_KEY, '' as string)
 
   const status = ref<LoMUpdateStatus>()
   const progress = ref<LoMUpdateProgress>(idleProgress())
@@ -26,24 +24,15 @@ function createLomUpdate() {
   const skippedRemoteVersion = ref<string>()
 
   const isBedrock = computed(() => isBedrockInstance(instance.value))
-  const isLoM = computed(() => isLoMProfile(instance.value))
-  const updating = computed(() =>
-    progress.value.phase === 'checking' ||
-    progress.value.phase === 'downloading' ||
-    progress.value.phase === 'cancelling' ||
-    progress.value.phase === 'installing',
-  )
+  const isLoM = computed(() => isManagedLoMProfile(instance.value, path.value, managedPaths.value, pendingPath.value))
+  const updating = computed(() => ['checking', 'downloading', 'cancelling', 'installing'].includes(progress.value.phase))
   const cancellable = computed(() => isLoM.value && progress.value.phase === 'downloading')
   const initialChecking = computed(() => checking.value && status.value === undefined)
-  const percentage = computed(() => {
-    if (progress.value.bytesTotal > 0) {
-      return Math.min(100, Math.round((progress.value.bytesDone / progress.value.bytesTotal) * 100))
-    }
-    if (progress.value.filesTotal > 0) {
-      return Math.min(100, Math.round((progress.value.filesDone / progress.value.filesTotal) * 100))
-    }
-    return 0
-  })
+  const percentage = computed(() => progress.value.bytesTotal > 0
+    ? Math.min(100, Math.round((progress.value.bytesDone / progress.value.bytesTotal) * 100))
+    : progress.value.filesTotal > 0
+      ? Math.min(100, Math.round((progress.value.filesDone / progress.value.filesTotal) * 100))
+      : 0)
 
   const buttonText = computed<string | undefined>(() => {
     if (!isLoM.value) return undefined
@@ -62,21 +51,8 @@ function createLomUpdate() {
     return undefined
   })
 
-  // Keep the main launch button clickable while downloading so it can act as
-  // the cancellation control. Checking/cancelling/installing remain locked.
-  const buttonLoading = computed(() => isLoM.value && (
-    initialChecking.value ||
-    progress.value.phase === 'checking' ||
-    progress.value.phase === 'cancelling' ||
-    progress.value.phase === 'installing'
-  ))
-  const actionable = computed(() => isLoM.value && (
-    cancellable.value ||
-    progress.value.phase === 'error' ||
-    (!!status.value?.available && !buttonLoading.value && !(
-      !!status.value.installedVersion && skippedRemoteVersion.value === status.value.remoteVersion
-    ))
-  ))
+  const buttonLoading = computed(() => isLoM.value && (initialChecking.value || ['checking', 'cancelling', 'installing'].includes(progress.value.phase)))
+  const actionable = computed(() => isLoM.value && (cancellable.value || progress.value.phase === 'error' || (!!status.value?.available && !buttonLoading.value && !(!!status.value.installedVersion && skippedRemoteVersion.value === status.value.remoteVersion))))
 
   let statusRequest = 0
   async function refresh() {
@@ -99,48 +75,33 @@ function createLomUpdate() {
 
   async function syncProgress() {
     if (!isLoM.value) return
-    try {
-      progress.value = await getLoMUpdateProgress()
-    } catch (e) {
-      console.error('[LoM updater] Failed to read progress', e)
-    }
+    try { progress.value = await getLoMUpdateProgress() }
+    catch (e) { console.error('[LoM updater] Failed to read progress', e) }
   }
 
   let progressTimer: ReturnType<typeof setInterval> | undefined
   async function run(instancePath = path.value) {
-    if (!instancePath || !isLoM.value || isBedrock.value) return
-    if (cancellable.value) {
-      await cancel(instancePath)
-      return
-    }
+    if (!instancePath || instancePath !== path.value || !isLoM.value || isBedrock.value) return
+    if (cancellable.value) { await cancel(instancePath); return }
     if (updating.value) return
     skippedRemoteVersion.value = undefined
     progress.value = { ...idleProgress(), phase: 'checking' }
     if (progressTimer) clearInterval(progressTimer)
     progressTimer = setInterval(() => { void syncProgress() }, 250)
-    try {
-      await applyLoMUpdate(instancePath)
-    } catch (e) {
+    try { await applyLoMUpdate(instancePath) }
+    catch (e) {
       await syncProgress()
-      // A user cancellation returns the updater to idle and is not an error.
       if (progress.value.phase !== 'idle') console.error('[LoM updater] Update failed', e)
     } finally {
-      if (progressTimer) {
-        clearInterval(progressTimer)
-        progressTimer = undefined
-      }
+      if (progressTimer) { clearInterval(progressTimer); progressTimer = undefined }
       await syncProgress()
       await refresh()
     }
   }
 
   async function cancel(instancePath = path.value) {
-    if (!instancePath || !isLoM.value || !cancellable.value) return false
-    if (status.value?.installedVersion && status.value.remoteVersion) {
-      // After cancelling an optional update, let the user launch the currently
-      // installed revision. A newer remote revision will be offered again.
-      skippedRemoteVersion.value = status.value.remoteVersion
-    }
+    if (!instancePath || instancePath !== path.value || !isLoM.value || !cancellable.value) return false
+    if (status.value?.installedVersion && status.value.remoteVersion) skippedRemoteVersion.value = status.value.remoteVersion
     progress.value = { ...progress.value, phase: 'cancelling', bytesPerSecond: 0 }
     try {
       const accepted = await cancelLoMUpdate(instancePath)
@@ -153,8 +114,19 @@ function createLomUpdate() {
     }
   }
 
-  // Startup and profile changes only check whether an install/update exists.
-  // Downloading starts exclusively from the user's explicit launch-button click.
+  watch([path, instance], () => {
+    const instancePath = path.value
+    if (managedPaths.value.length === 0 && instancePath && isLoMProfile(instance.value)) {
+      managedPaths.value = [instancePath]
+    }
+  }, { immediate: true })
+
+  watch([path, instance, pendingPath], () => {
+    if (pendingPath.value === path.value && isManagedLoMProfile(instance.value, path.value, managedPaths.value, pendingPath.value) && !managedPaths.value.includes(path.value)) {
+      managedPaths.value = [...managedPaths.value, path.value]
+    }
+  }, { immediate: true })
+
   watch([path, isBedrock, isLoM], () => {
     status.value = undefined
     progress.value = idleProgress()
@@ -164,25 +136,9 @@ function createLomUpdate() {
     if (isLoM.value) void refresh()
   }, { immediate: true })
 
-  setInterval(() => {
-    if (isLoM.value) void refresh()
-  }, 60_000)
+  setInterval(() => { if (isLoM.value) void refresh() }, 60_000)
 
-  return {
-    status,
-    progress,
-    checking,
-    updating,
-    cancellable,
-    initialChecking,
-    percentage,
-    buttonText,
-    buttonLoading,
-    actionable,
-    refresh,
-    run,
-    cancel,
-  }
+  return { status, progress, checking, updating, cancellable, initialChecking, percentage, buttonText, buttonLoading, actionable, refresh, run, cancel }
 }
 
 export function useLomUpdate() {
