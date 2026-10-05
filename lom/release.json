@@ -2,5 +2,6 @@
     "channel": "dev",
     "version": "1.8.5",
     "releasedAt": "2026-10-05",
-    "inAppUpdate": true
+    "inAppUpdate": true,
+    "build": 2
 }
