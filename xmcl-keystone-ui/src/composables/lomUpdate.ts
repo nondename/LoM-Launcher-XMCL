@@ -114,9 +114,13 @@ function createLomUpdate() {
     }
   }
 
+  // Migration from pre-ownership builds. `path` and `instance` are separate
+  // reactive values and can briefly refer to different profiles while switching.
+  // Only claim the path when the instance object itself reports that exact path.
   watch([path, instance], () => {
     const instancePath = path.value
-    if (managedPaths.value.length === 0 && instancePath && isLoMProfile(instance.value)) {
+    const current = instance.value
+    if (managedPaths.value.length === 0 && instancePath && current?.path === instancePath && isLoMProfile(current)) {
       managedPaths.value = [instancePath]
     }
   }, { immediate: true })
