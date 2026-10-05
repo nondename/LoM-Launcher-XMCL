@@ -1,0 +1,112 @@
+name: LoM DEV Release
+
+on:
+  push:
+    branches:
+      - dev
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lom-dev-release
+  cancel-in-progress: false
+
+jobs:
+  publish-dev:
+    runs-on: windows-latest
+    env:
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Fix node-gyp Python packages
+        shell: pwsh
+        run: python3 -m pip install --break-system-packages --user packaging setuptools
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Read DEV version
+        id: version
+        shell: pwsh
+        run: |
+          $root = Get-Content package.json -Raw | ConvertFrom-Json
+          $app = Get-Content xmcl-electron-app/package.json -Raw | ConvertFrom-Json
+          if ($root.version -ne $app.version) { throw "Root/app version mismatch" }
+          if ($root.version -notmatch '-dev\.') { throw "DEV release version must contain -dev.: $($root.version)" }
+          "version=$($root.version)" >> $env:GITHUB_OUTPUT
+          "tag=v$($root.version)" >> $env:GITHUB_OUTPUT
+
+      - name: Typecheck Electron app
+        run: pnpm run --prefix xmcl-electron-app check
+
+      - name: Run LoM regression tests
+        run: pnpm vitest run xmcl-runtime/infra/plugins/task.test.ts xmcl-runtime/instanceIO/lomDistribution.test.ts
+
+      - name: Build LoM Launcher
+        shell: pwsh
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          NODE_OPTIONS: --max-old-space-size=32768
+          NODE_ENV: production
+          RELEASE: false
+          CURSEFORGE_API_KEY: ${{ secrets.CURSEFORGE_API_TOKEN }}
+        run: |
+          pnpm run --prefix xmcl-keystone-ui build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm run --prefix xmcl-electron-app build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Validate update payload
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $out = 'xmcl-electron-app/build/output'
+          $asar = "$out/app-$version-win.asar"
+          if (!(Test-Path $asar)) { throw "Missing $asar" }
+          if (!(Test-Path "$asar.gz")) { throw "Missing $asar.gz" }
+          if (!(Test-Path "$asar.sha256")) { throw "Missing $asar.sha256" }
+          if (!(Test-Path "$out/win-unpacked/LoM Launcher.exe")) { throw 'Missing LoM Launcher.exe' }
+
+      - name: Package bootstrap build
+        shell: pwsh
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          Compress-Archive -Path 'xmcl-electron-app/build/output/win-unpacked/*' -DestinationPath "LoM-Launcher-v$version-windows-x64.zip" -CompressionLevel Optimal
+          (Get-FileHash "LoM-Launcher-v$version-windows-x64.zip" -Algorithm SHA256).Hash.ToLowerInvariant() | Set-Content -NoNewline "LoM-Launcher-v$version-windows-x64.zip.sha256"
+
+      - name: Publish DEV prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ steps.version.outputs.version }}'
+          $tag = '${{ steps.version.outputs.tag }}'
+          $out = 'xmcl-electron-app/build/output'
+          if (gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null) {
+            gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag
+          }
+          gh release create $tag `
+            "$out/app-$version-win.asar" `
+            "$out/app-$version-win.asar.gz" `
+            "$out/app-$version-win.asar.sha256" `
+            "LoM-Launcher-v$version-windows-x64.zip" `
+            "LoM-Launcher-v$version-windows-x64.zip.sha256" `
+            --repo $env:GITHUB_REPOSITORY `
+            --target $env:GITHUB_SHA `
+            --title "LoM Launcher $version (DEV)" `
+            --notes "DEV channel build from commit $env:GITHUB_SHA. Includes managed-instance isolation and migration for existing Legends of Medieval profiles." `
+            --prerelease
