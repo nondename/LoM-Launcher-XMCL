@@ -1,6 +1,7 @@
 name: LoM Release
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - master
@@ -196,9 +197,6 @@ jobs:
             )
           }
 
-          # DEV channel: flag the release as a pre-release so it is only offered
-          # to launchers with the DEV update channel enabled. Stable releases are
-          # marked latest, which keeps them visible on the repo landing page.
           $channelFlags = @()
           if ('${{ steps.release.outputs.channel }}' -eq 'dev') {
             $channelFlags += '--prerelease'
