@@ -40,6 +40,13 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
     return this.app.registry.getOrCreate(LoMUpdateService)
   }
 
+  private describeInstance(path: string) {
+    const instance = this.instanceService.state.all[path]
+    return instance
+      ? `path=${path} name=${JSON.stringify(instance.name)} edition=${instance.edition ?? 'java'} minecraft=${instance.runtime.minecraft ?? '-'} forge=${instance.runtime.forge ?? '-'} fileApi=${instance.fileApi ?? '-'}`
+      : `path=${path} instance=MISSING`
+  }
+
   private assertLoMInstance(path: string) {
     const instance = this.instanceService.state.all[path]
     const isLoM = !!instance &&
@@ -49,22 +56,26 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
       instance.runtime.forge === LOM_FORGE_VERSION
 
     if (!isLoM) {
-      this.warn(`[LoM Updater] Rejected unrelated instance: ${path}`)
+      this.warn(`[LoM Diagnostics] REJECT dedicated updater ${this.describeInstance(path)}`)
       throw new Error(`LoM updater cannot operate on unrelated instance: ${path}`)
     }
+    this.log(`[LoM Diagnostics] ACCEPT dedicated updater ${this.describeInstance(path)}`)
   }
 
   async checkLoMUpdate(path: string): Promise<LoMUpdateStatus> {
+    this.log(`[LoM Diagnostics] checkLoMUpdate requested ${this.describeInstance(path)}`)
     this.assertLoMInstance(path)
     return (await this.getLoMUpdater()).check(path)
   }
 
   async applyLoMUpdate(path: string): Promise<LoMUpdateResult> {
+    this.log(`[LoM Diagnostics] applyLoMUpdate requested ${this.describeInstance(path)}`)
     this.assertLoMInstance(path)
     return (await this.getLoMUpdater()).update(path)
   }
 
   async cancelLoMUpdate(path: string): Promise<boolean> {
+    this.log(`[LoM Diagnostics] cancelLoMUpdate requested ${this.describeInstance(path)}`)
     this.assertLoMInstance(path)
     return (await this.getLoMUpdater()).cancel(path)
   }
@@ -111,11 +122,16 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
   async fetchInstanceUpdate(path: string): Promise<InstanceUpdate | undefined> {
     const instancePath = path
     const instance = this.instanceService.state.all[instancePath]
+    this.log(`[LoM Diagnostics] fetchInstanceUpdate requested ${this.describeInstance(instancePath)}`)
     if (!instance) throw new InstanceIOException({ instancePath, type: 'instanceNotFound' })
-    if (!instance.fileApi) return undefined
+    if (!instance.fileApi) {
+      this.log(`[LoM Diagnostics] generic instance updater skipped: no fileApi path=${instancePath}`)
+      return undefined
+    }
     const url = isValidUrl(instance.fileApi)
     if (!url || (url.protocol !== 'http:' && url.protocol !== 'https')) throw new InstanceIOException({ instancePath, type: 'instanceInvalidFileApi', url: instance.fileApi })
     const manifestUrl = joinFileApiUrl(instance.fileApi, 'manifest.json')
+    this.log(`[LoM Diagnostics] generic manifest GET path=${instancePath} url=${manifestUrl}`)
     let manifest: InstanceManifest
     try {
       const response = await this.app.fetch(manifestUrl)
@@ -134,13 +150,19 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
       if (file.downloads) { if (!file.downloads.includes(fileApiUrl)) file.downloads.push(fileApiUrl) }
       else file.downloads = [fileApiUrl]
     }
+    this.log(`[LoM Diagnostics] generic manifest resolved path=${instancePath} updates=${updates.length} files=${manifest.files?.length ?? 0}`)
     return { updates, manifest }
   }
 
   @Singleton(p => p)
   async applyInstanceUpdate(path: string): Promise<InstanceUpdate | undefined> {
+    this.log(`[LoM Diagnostics] applyInstanceUpdate requested ${this.describeInstance(path)}`)
     const update = await this.fetchInstanceUpdate(path)
-    if (!update || update.updates.length === 0) return update
+    if (!update || update.updates.length === 0) {
+      this.log(`[LoM Diagnostics] applyInstanceUpdate nothing-to-do path=${path}`)
+      return update
+    }
+    this.log(`[LoM Diagnostics] applyInstanceUpdate begin path=${path} files=${update.updates.length}`)
     for (const { file } of update.updates) {
       const destination = join(path, file.path)
       const temp = `${destination}.lom-update`
@@ -148,6 +170,7 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
       let lastError: unknown
       for (const download of file.downloads ?? []) {
         try {
+          this.log(`[LoM Diagnostics] generic download path=${path} file=${file.path} url=${download} destination=${destination}`)
           const response = await this.app.fetch(download)
           if (!response.ok) throw new Error(`HTTP ${response.status} while downloading ${download}`)
           const bytes = Buffer.from(await response.arrayBuffer())
@@ -156,15 +179,18 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
           if (actual !== file.hashes.sha1) throw new Error(`SHA-1 mismatch for ${file.path}: expected ${file.hashes.sha1}, got ${actual}`)
           await unlink(destination).catch(() => undefined)
           await rename(temp, destination)
+          this.log(`[LoM Diagnostics] generic installed path=${path} file=${file.path} destination=${destination} bytes=${bytes.length}`)
           lastError = undefined
           break
         } catch (e) {
           lastError = e
+          this.warn(`[LoM Diagnostics] generic download failed path=${path} file=${file.path} url=${download}: ${e instanceof Error ? e.message : String(e)}`)
           await unlink(temp).catch(() => undefined)
         }
       }
       if (lastError) throw lastError
     }
+    this.log(`[LoM Diagnostics] applyInstanceUpdate complete path=${path} files=${update.updates.length}`)
     return update
   }
 }
