@@ -38,7 +38,7 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
 
   private async diagnostic(message: string) {
     const line = `[${new Date().toISOString()}] ${message}\n`
-    void this.diagnostic(`${message}`)
+    this.log(`[LoM Diagnostics] ${message}`)
     try {
       const getGameDataPath = await this.app.registry.get(kGameDataPath)
       await appendFile(getGameDataPath('lom-diagnostics.log'), line, 'utf-8')
