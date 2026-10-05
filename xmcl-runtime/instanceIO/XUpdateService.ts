@@ -17,6 +17,10 @@ import { writeZipFile } from '../util/zip'
 import { ZipFile } from 'yazl'
 import { LoMUpdateService } from './LoMUpdateService'
 
+const LOM_PROFILE_NAME = 'Legends of Medieval'
+const LOM_MINECRAFT_VERSION = '1.20.1'
+const LOM_FORGE_VERSION = '47.4.22'
+
 function joinFileApiUrl(base: string, relativePath: string): string {
   const normalizedBase = base.endsWith('/') ? base : `${base}/`
   const normalizedPath = relativePath.replace(/\\/g, '/').replace(/^\/+/, '')
@@ -36,15 +40,32 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
     return this.app.registry.getOrCreate(LoMUpdateService)
   }
 
+  private assertLoMInstance(path: string) {
+    const instance = this.instanceService.state.all[path]
+    const isLoM = !!instance &&
+      instance.edition !== 'bedrock' &&
+      instance.name === LOM_PROFILE_NAME &&
+      instance.runtime.minecraft === LOM_MINECRAFT_VERSION &&
+      instance.runtime.forge === LOM_FORGE_VERSION
+
+    if (!isLoM) {
+      this.warn(`[LoM Updater] Rejected unrelated instance: ${path}`)
+      throw new Error(`LoM updater cannot operate on unrelated instance: ${path}`)
+    }
+  }
+
   async checkLoMUpdate(path: string): Promise<LoMUpdateStatus> {
+    this.assertLoMInstance(path)
     return (await this.getLoMUpdater()).check(path)
   }
 
   async applyLoMUpdate(path: string): Promise<LoMUpdateResult> {
+    this.assertLoMInstance(path)
     return (await this.getLoMUpdater()).update(path)
   }
 
   async cancelLoMUpdate(path: string): Promise<boolean> {
+    this.assertLoMInstance(path)
     return (await this.getLoMUpdater()).cancel(path)
   }
 
