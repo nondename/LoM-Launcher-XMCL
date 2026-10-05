@@ -3,7 +3,7 @@ import { isBedrockInstance } from '@xmcl/instance'
 import { XUpdateServiceKey, type LoMUpdateProgress, type LoMUpdateStatus } from '@xmcl/runtime-api'
 import { useLocalStorage } from '@vueuse/core'
 import { kInstance } from './instance'
-import { isManagedLoMProfile, LOM_COLD_START_PENDING_KEY, LOM_MANAGED_INSTANCE_PATHS_KEY } from './lomProfile'
+import { isLoMProfile, isManagedLoMProfile, LOM_COLD_START_PENDING_KEY, LOM_MANAGED_INSTANCE_PATHS_KEY } from './lomProfile'
 import { useService } from './service'
 
 const idleProgress = (): LoMUpdateProgress => ({
@@ -113,6 +113,22 @@ function createLomUpdate() {
       return false
     }
   }
+
+  // Migration for launchers that already had the canonical LoM profile before
+  // managed-instance ownership was introduced. The first canonical profile the
+  // user selects is adopted only while the managed registry is still empty.
+  // New installations go through the same path, so they become managed without
+  // reusing the legacy cold-start auto-install marker.
+  watch([path, instance], () => {
+    const instancePath = path.value
+    if (
+      managedPaths.value.length === 0 &&
+      instancePath &&
+      isLoMProfile(instance.value)
+    ) {
+      managedPaths.value = [instancePath]
+    }
+  }, { immediate: true })
 
   // A cold-start path is generated only by the launcher itself. Persist it as
   // managed before the cold-start hand-off is cleared, so ownership survives
