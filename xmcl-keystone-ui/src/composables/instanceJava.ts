@@ -68,13 +68,37 @@ export function useInstanceJava(instance: Ref<Instance>, version: Ref<InstanceRe
   })
 
   function getComputedJava(instance: Instance, version: InstanceResolveVersion | undefined) {
-    return getAutoSelectedJava(
+    const detected = getAutoSelectedJava(
       all.value,
       instance.runtime.minecraft,
       instance.runtime.forge,
       version,
       globalJava?.value || undefined,
     )
+
+    // Managed profiles may pin the Java runtime independently from XMCL's
+    // generic Minecraft heuristics. Ordinary user-created instances never enter
+    // this branch and retain the upstream XMCL selection behavior unchanged.
+    const managedJava = instance.managed?.java
+    if (!managedJava) return detected
+
+    const preference = {
+      match: (java: JavaRecord) => java.majorVersion === managedJava.majorVersion,
+      okay: (java: JavaRecord) => java.majorVersion === managedJava.majorVersion,
+      requirement: `=${managedJava.majorVersion}`,
+    }
+    const selected = all.value.find((java) => java.valid && preference.match(java))
+    return {
+      ...detected,
+      preference,
+      javaVersion: {
+        ...detected.javaVersion,
+        majorVersion: managedJava.majorVersion,
+        ...(managedJava.component ? { component: managedJava.component } : {}),
+      },
+      java: selected ? { ...selected, valid: true } : undefined,
+      noJava: all.value.every((java) => !java.valid),
+    }
   }
 
   async function getInstanceJavaStatus(version: InstanceResolveVersion | undefined, inst: Instance) {
