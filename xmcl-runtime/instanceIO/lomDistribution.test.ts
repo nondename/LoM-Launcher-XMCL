@@ -18,10 +18,18 @@ describe('LoM distribution adapter', () => {
         modules: [{
           type: 'ForgeHosted',
           artifact: {
-            url: 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/repo/net/minecraftforge/forge.jar',
+            url: 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/repo/lib/net/minecraftforge/lowcodelanguage/1.20.1-47.4.22/lowcodelanguage-1.20.1-47.4.22.jar',
             MD5: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
           },
           subModules: [{
+            id: '1.20.1-47.4.22',
+            type: 'VersionManifest',
+            artifact: {
+              size: 999,
+              url: 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/repo/versions/1.20.1-forge-47.4.22/1.20.1-forge-47.4.22.json',
+              MD5: 'cccccccccccccccccccccccccccccccc',
+            },
+          }, {
             type: 'ForgeMod',
             artifact: {
               size: 1234,
@@ -39,7 +47,7 @@ describe('LoM distribution adapter', () => {
           }, {
             type: 'Library',
             artifact: {
-              url: 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/repo/com/example/library.jar',
+              url: 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/repo/lib/com/example/library/1.0/library-1.0.jar',
               MD5: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
             },
           }],
@@ -67,6 +75,21 @@ describe('LoM distribution adapter', () => {
       }),
     ]))
     expect(manifest.files.some((file) => file.path.startsWith('repo/'))).toBe(false)
+    expect(manifest.runtimeVersion).toBe('1.20.1-47.4.22')
+    expect(manifest.runtimeFiles).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        path: 'libraries/net/minecraftforge/lowcodelanguage/1.20.1-47.4.22/lowcodelanguage-1.20.1-47.4.22.jar',
+        hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      }),
+      expect.objectContaining({
+        path: 'libraries/com/example/library/1.0/library-1.0.jar',
+        hash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      }),
+      expect.objectContaining({
+        path: 'versions/1.20.1-forge-47.4.22/1.20.1-forge-47.4.22.json',
+        hash: 'cccccccccccccccccccccccccccccccc',
+      }),
+    ]))
     expect(manifest.delete).toEqual(expect.arrayContaining([
       'config/lom-updater-test.txt',
       'mods/Antique Atlas 1.20.1.jar',
