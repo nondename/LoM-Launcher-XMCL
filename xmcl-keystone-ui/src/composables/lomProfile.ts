@@ -16,6 +16,7 @@ export const LOM_MANAGED_INSTANCE: ManagedInstance = {
   manifestUrl: 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json',
   java: {
     majorVersion: 17,
+    component: 'java-runtime-gamma',
   },
 }
 
