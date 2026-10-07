@@ -1,12 +1,11 @@
 import { injection } from '@/util/inject'
 import { isBedrockInstance } from '@xmcl/instance'
-import { XUpdateServiceKey, type LoMUpdateProgress, type LoMUpdateStatus } from '@xmcl/runtime-api'
-import { useLocalStorage } from '@vueuse/core'
+import { XUpdateServiceKey, type ManagedInstanceUpdateProgress, type ManagedInstanceUpdateStatus } from '@xmcl/runtime-api'
 import { kInstance } from './instance'
-import { isLoMProfile, isManagedLoMProfile, LOM_COLD_START_PENDING_KEY, LOM_MANAGED_INSTANCE_PATHS_KEY } from './lomProfile'
+import { isManagedLoMProfile } from './lomProfile'
 import { useService } from './service'
 
-const idleProgress = (): LoMUpdateProgress => ({
+const idleProgress = (): ManagedInstanceUpdateProgress => ({
   phase: 'idle', filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0,
 })
 
@@ -14,17 +13,20 @@ let sharedLomUpdate: ReturnType<typeof createLomUpdate> | undefined
 
 function createLomUpdate() {
   const { path, instance } = injection(kInstance)
-  const { checkLoMUpdate, applyLoMUpdate, cancelLoMUpdate, getLoMUpdateProgress } = useService(XUpdateServiceKey)
-  const managedPaths = useLocalStorage<string[]>(LOM_MANAGED_INSTANCE_PATHS_KEY, [])
-  const pendingPath = useLocalStorage(LOM_COLD_START_PENDING_KEY, '' as string)
+  const {
+    checkManagedInstanceUpdate,
+    applyManagedInstanceUpdate,
+    cancelManagedInstanceUpdate,
+    getManagedInstanceUpdateProgress,
+  } = useService(XUpdateServiceKey)
 
-  const status = ref<LoMUpdateStatus>()
-  const progress = ref<LoMUpdateProgress>(idleProgress())
+  const status = ref<ManagedInstanceUpdateStatus>()
+  const progress = ref<ManagedInstanceUpdateProgress>(idleProgress())
   const checking = ref(false)
   const skippedRemoteVersion = ref<string>()
 
   const isBedrock = computed(() => isBedrockInstance(instance.value))
-  const isLoM = computed(() => isManagedLoMProfile(instance.value, path.value, managedPaths.value, pendingPath.value))
+  const isLoM = computed(() => isManagedLoMProfile(instance.value))
   const updating = computed(() => ['checking', 'downloading', 'cancelling', 'installing'].includes(progress.value.phase))
   const cancellable = computed(() => isLoM.value && progress.value.phase === 'downloading')
   const initialChecking = computed(() => checking.value && status.value === undefined)
@@ -61,7 +63,7 @@ function createLomUpdate() {
     const request = ++statusRequest
     checking.value = true
     try {
-      const next = await checkLoMUpdate(instancePath)
+      const next = await checkManagedInstanceUpdate(instancePath)
       if (request === statusRequest && path.value === instancePath && isLoM.value) {
         if (skippedRemoteVersion.value && skippedRemoteVersion.value !== next.remoteVersion) skippedRemoteVersion.value = undefined
         status.value = next
@@ -75,7 +77,7 @@ function createLomUpdate() {
 
   async function syncProgress() {
     if (!isLoM.value) return
-    try { progress.value = await getLoMUpdateProgress() }
+    try { progress.value = await getManagedInstanceUpdateProgress(path.value) }
     catch (e) { console.error('[LoM updater] Failed to read progress', e) }
   }
 
@@ -88,7 +90,7 @@ function createLomUpdate() {
     progress.value = { ...idleProgress(), phase: 'checking' }
     if (progressTimer) clearInterval(progressTimer)
     progressTimer = setInterval(() => { void syncProgress() }, 250)
-    try { await applyLoMUpdate(instancePath) }
+    try { await applyManagedInstanceUpdate(instancePath) }
     catch (e) {
       await syncProgress()
       if (progress.value.phase !== 'idle') console.error('[LoM updater] Update failed', e)
@@ -104,7 +106,7 @@ function createLomUpdate() {
     if (status.value?.installedVersion && status.value.remoteVersion) skippedRemoteVersion.value = status.value.remoteVersion
     progress.value = { ...progress.value, phase: 'cancelling', bytesPerSecond: 0 }
     try {
-      const accepted = await cancelLoMUpdate(instancePath)
+      const accepted = await cancelManagedInstanceUpdate(instancePath)
       if (!accepted) await syncProgress()
       return accepted
     } catch (e) {
@@ -113,31 +115,6 @@ function createLomUpdate() {
       return false
     }
   }
-
-  // Migration for launchers that already had the canonical LoM profile before
-  // managed-instance ownership was introduced. The first canonical profile the
-  // user selects is adopted only while the managed registry is still empty.
-  // New installations go through the same path, so they become managed without
-  // reusing the legacy cold-start auto-install marker.
-  watch([path, instance], () => {
-    const instancePath = path.value
-    if (
-      managedPaths.value.length === 0 &&
-      instancePath &&
-      isLoMProfile(instance.value)
-    ) {
-      managedPaths.value = [instancePath]
-    }
-  }, { immediate: true })
-
-  // A cold-start path is generated only by the launcher itself. Persist it as
-  // managed before the cold-start hand-off is cleared, so ownership survives
-  // restarts. Ordinary instances never enter this list.
-  watch([path, instance, pendingPath], () => {
-    if (pendingPath.value === path.value && isManagedLoMProfile(instance.value, path.value, managedPaths.value, pendingPath.value) && !managedPaths.value.includes(path.value)) {
-      managedPaths.value = [...managedPaths.value, path.value]
-    }
-  }, { immediate: true })
 
   watch([path, isBedrock, isLoM], () => {
     status.value = undefined
