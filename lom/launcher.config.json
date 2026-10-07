@@ -20,6 +20,15 @@
       "address": "localhost",
       "port": 25565,
       "autoConnect": false
+    },
+    "managed": {
+      "provider": "lom-distribution",
+      "profileId": "legends-of-medieval",
+      "channel": "dev",
+      "manifestUrl": "https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json",
+      "java": {
+        "majorVersion": 17
+      }
     }
   },
   "distribution": {
