@@ -6,7 +6,7 @@ import { useService } from './service'
 import { useState } from './syncableState'
 import { InstanceOrGroupData } from './instanceGroup'
 import { kUserContext } from './user'
-import { LOM_COLD_START_PENDING_KEY, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
+import { isLegacyLoMProfile, LOM_COLD_START_PENDING_KEY, LOM_LEGACY_MANAGED_INSTANCE_PATHS_KEY, LOM_MANAGED_INSTANCE, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
 
 export const kInstances: InjectionKey<ReturnType<typeof useInstances>> = Symbol('Instances')
 
@@ -92,6 +92,9 @@ export function useInstances() {
 
   const _path = useLocalStorage('selectedInstancePath', '' as string)
   const coldStartPendingPath = useLocalStorage(LOM_COLD_START_PENDING_KEY, '' as string)
+  // Read-only migration source from launcher builds that tracked LoM ownership
+  // by absolute path. New builds persist ownership in instance.json instead.
+  const legacyManagedPaths = useLocalStorage<string[]>(LOM_LEGACY_MANAGED_INSTANCE_PATHS_KEY, [])
   const path = ref('')
   // Guard against `watch(instances)` clobbering the restored selection before
   // the async `watch(state)` initializer has finished. Without this, the
@@ -105,6 +108,7 @@ export function useInstances() {
   migrationBus.once((e) => {
     _path.value = _path.value.replace(e.oldRoot, e.newRoot)
     coldStartPendingPath.value = coldStartPendingPath.value.replace(e.oldRoot, e.newRoot)
+    legacyManagedPaths.value = legacyManagedPaths.value.map((value) => value.replace(e.oldRoot, e.newRoot))
   })
 
   async function edit(options: EditInstanceOptions & { instancePath: string }) {
@@ -138,21 +142,42 @@ export function useInstances() {
     }
 
     try {
-      // A brand-new LoM Launcher creates and selects the canonical profile, but
-      // does not start downloading anything until the user explicitly clicks
-      // Install/Update. Authlib injector is disabled before the first launch.
+      // Migrate ownership once from old launcher builds. The path list and the
+      // cold-start marker are migration hints only; all future ownership checks
+      // use instance.managed. The authlib flag is a final fallback for the
+      // canonical profile created by early LoM Launcher builds.
+      const alreadyManaged = newVal.instances.some((candidate) =>
+        candidate.managed?.provider === LOM_MANAGED_INSTANCE.provider &&
+        candidate.managed.profileId === LOM_MANAGED_INSTANCE.profileId,
+      )
+      if (!alreadyManaged) {
+        const legacy = newVal.instances.find((candidate) =>
+          isLegacyLoMProfile(candidate) && (
+            legacyManagedPaths.value.includes(candidate.path) ||
+            coldStartPendingPath.value === candidate.path ||
+            candidate.disableAuthlibInjector === true
+          ),
+        )
+        if (legacy) {
+          await editInstance({
+            instancePath: legacy.path,
+            managed: JSON.parse(JSON.stringify(LOM_MANAGED_INSTANCE)),
+          })
+          legacyManagedPaths.value = legacyManagedPaths.value.filter((value) => value !== legacy.path)
+          if (coldStartPendingPath.value === legacy.path) coldStartPendingPath.value = ''
+        }
+      }
+
+      // A brand-new LoM Launcher creates and selects the canonical managed
+      // profile, but does not download the pack until the user explicitly
+      // clicks Install/Update. Ordinary instances still use XMCL creation.
       if (newVal.instances.length === 0) {
         const createdPath = await createInstance({
           name: LOM_PROFILE_NAME,
           runtime: { ...LOM_PROFILE_RUNTIME },
-        })
-        await editInstance({
-          instancePath: createdPath,
+          managed: JSON.parse(JSON.stringify(LOM_MANAGED_INSTANCE)),
           disableAuthlibInjector: true,
         })
-        // Clear the legacy cold-start auto-install marker. The launch button may
-        // still observe this key for older profiles, but new LoM profiles must
-        // wait for an explicit user action before installing files.
         coldStartPendingPath.value = ''
         _path.value = createdPath
       } else {
