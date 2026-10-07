@@ -18,7 +18,7 @@ import { TaskState, BedrockServiceKey } from '@xmcl/runtime-api'
 import { useService } from './service'
 import { useTask } from './task'
 import { useLomUpdate } from './lomUpdate'
-import { LOM_COLD_START_PENDING_KEY, isLoMProfile } from './lomProfile'
+import { LOM_COLD_START_PENDING_KEY, isManagedLoMProfile } from './lomProfile'
 import { withRendererAction, type RendererActionScope } from '@/rendererAction'
 
 export interface LaunchMenuItem {
@@ -182,10 +182,10 @@ export function useLaunchButton() {
   })
 
   async function continueLoMInstall(instancePath: string) {
-    if (path.value !== instancePath || !isLoMProfile(instance.value) || isBedrock.value) return false
+    if (path.value !== instancePath || !isManagedLoMProfile(instance.value) || isBedrock.value) return false
 
     await refreshLomUpdate()
-    if (path.value !== instancePath || !isLoMProfile(instance.value)) return false
+    if (path.value !== instancePath || !isManagedLoMProfile(instance.value)) return false
 
     if (lomUpdateStatus.value?.available) {
       await runLomUpdate(instancePath)
@@ -441,7 +441,7 @@ export function useLaunchButton() {
     if (coldStartRunning) return
     const instancePath = path.value
     if (!instancePath || coldStartPendingPath.value !== instancePath) return
-    if (!isLoMProfile(instance.value) || isBedrock.value) return
+    if (!isManagedLoMProfile(instance.value) || isBedrock.value) return
     if (transition.value || loading.value || hasTaskRunning.value || hasGameRunning.value) return
 
     if (issues.value) {
