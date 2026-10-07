@@ -368,6 +368,14 @@ export function useLaunchButton() {
           menu: launchMenuItems.value.filter((i) => !i.noDisplay),
           actionName: 'user_action.instance.repair',
           onClick: async (instancePath, action) => {
+            // Managed profiles materialize provider-owned runtime files first.
+            // If our provider is unavailable, stop instead of silently falling
+            // back to Forge/Maven and violating the managed-source contract.
+            if (isManagedLoMProfile(instance.value)) {
+              await runLomUpdate(instancePath)
+              if (lomUpdateProgress.value.phase === 'error') return
+            }
+
             const repaired = await Promise.allSettled([
               fixVersionIssues(instancePath, action),
               fixInstanceFileIssue(instancePath, action),
