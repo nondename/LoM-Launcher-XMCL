@@ -56,7 +56,7 @@ const LEGACY_STATE_FILE = '.lom-update.json'
 const DEFAULT_LOM_MANIFEST_URL =
   'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
 const DEFAULT_LITE_MANIFEST_URL =
-  'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/lite/distribution.json'
+  'https://raw.githubusercontent.com/nondename/LoM_Lite/dev/distribution.json'
 const LOM_PROFILE_ID = 'legends-of-medieval'
 const LITE_PROFILE_ID = 'legends-of-medieval-lite'
 const MAX_DOWNLOAD_ATTEMPTS = 4
