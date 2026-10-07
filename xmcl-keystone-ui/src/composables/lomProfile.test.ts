@@ -1,6 +1,6 @@
 import { InstanceSchema } from '@xmcl/instance'
 import { describe, expect, it } from 'vitest'
-import { isLegacyLoMProfile, isManagedLoMProfile, LOM_MANAGED_INSTANCE, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
+import { isLegacyLoMProfile, isManagedLoMProfile, LITE_MANAGED_INSTANCE, LITE_PROFILE_NAME, LITE_PROFILE_RUNTIME, LOM_MANAGED_INSTANCE, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
 
 function instance(data: Record<string, unknown>) {
   return {
@@ -25,6 +25,17 @@ describe('LoM managed profile ownership', () => {
       name: 'Renamed by user',
       runtime: { ...LOM_PROFILE_RUNTIME },
       managed: LOM_MANAGED_INSTANCE,
+    })
+
+    expect(isManagedLoMProfile(managed)).toBe(true)
+    expect(isLegacyLoMProfile(managed)).toBe(false)
+  })
+
+  it('recognizes the Lite managed identity independently from the main pack', () => {
+    const managed = instance({
+      name: LITE_PROFILE_NAME,
+      runtime: { ...LITE_PROFILE_RUNTIME },
+      managed: LITE_MANAGED_INSTANCE,
     })
 
     expect(isManagedLoMProfile(managed)).toBe(true)
