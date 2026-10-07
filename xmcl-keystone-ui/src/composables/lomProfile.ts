@@ -29,8 +29,8 @@ export const LOM_MANAGED_INSTANCE: ManagedInstance = {
 export const LITE_MANAGED_INSTANCE: ManagedInstance = {
   provider: 'lom-distribution',
   profileId: 'legends-of-medieval-lite',
-  channel: 'dev',
-  manifestUrl: 'https://raw.githubusercontent.com/nondename/LoM_Lite/dev/distribution.json',
+  channel: 'stable',
+  manifestUrl: 'https://raw.githubusercontent.com/nondename/LoM_Lite/main/distribution.json',
   java: {
     majorVersion: 17,
     component: 'java-runtime-gamma',
