@@ -174,11 +174,17 @@ export function useLaunchButton() {
   const { t, locale } = useI18n()
   const transition = computed(() => {
     const currentPath = path.value
-    return (
-      currentPath !== instruction.value?.instance ||
-      currentPath !== instanceInstallStatus.value?.instance ||
-      currentPath !== javaStatus.value?.instance
-    )
+    // Missing snapshots are not a transition by themselves. Their respective
+    // loading flags already block the button while a refresh is in flight.
+    // Treat only an actually-present snapshot for another instance as stale.
+    // Otherwise a perfectly installed vanilla/user instance can display
+    // "Launch" while onClick silently returns forever.
+    const snapshots = [
+      instruction.value?.instance,
+      instanceInstallStatus.value?.instance,
+      javaStatus.value?.instance,
+    ].filter((value): value is string => !!value)
+    return snapshots.some((snapshotPath) => snapshotPath !== currentPath)
   })
 
   async function continueLoMInstall(instancePath: string) {
@@ -548,7 +554,17 @@ export function useLaunchButton() {
    * Such rejections are intentional and not propagated.
    */
   async function onClick() {
-    if ((loading.value || transition.value) && !launching.value) return
+    if ((loading.value || transition.value) && !launching.value) {
+      console.warn('[launch-button] Ignore click while instance state is refreshing', {
+        instance: path.value,
+        loading: loading.value,
+        transition: transition.value,
+        instruction: instruction.value?.instance,
+        installStatus: instanceInstallStatus.value?.instance,
+        javaStatus: javaStatus.value?.instance,
+      })
+      return
+    }
     const instancePath = path.value
     if (!instancePath) return
     const facade = launchButtonFacade.value
