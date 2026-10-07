@@ -32,4 +32,11 @@ describe('Minecraft locale sync', () => {
   it('creates lang when options are missing', () => {
     expect(patchMinecraftLanguageOption('', 'ru_RU')).toBe('lang:ru_RU\n')
   })
+
+  it('preserves CRLF options files', () => {
+    expect(patchMinecraftLanguageOption(
+      'music:0.5\r\nlang:en_US\r\nrenderDistance:12\r\n',
+      'ru_RU',
+    )).toBe('music:0.5\r\nlang:ru_RU\r\nrenderDistance:12\r\n')
+  })
 })
