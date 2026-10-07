@@ -1,6 +1,6 @@
 import { checksum } from '@xmcl/core'
 import type { InstanceFile } from '@xmcl/instance'
-import { InstanceIOException, XUpdateServiceKey, type XUpdateService as IXUpdateService, type InstanceManifest, type InstanceUpdate, type SetInstanceManifestOptions, type LoMUpdateProgress, type LoMUpdateResult, type LoMUpdateStatus } from '@xmcl/runtime-api'
+import { InstanceIOException, XUpdateServiceKey, type XUpdateService as IXUpdateService, type InstanceManifest, type InstanceUpdate, type SetInstanceManifestOptions, type ManagedInstanceUpdateProgress, type ManagedInstanceUpdateResult, type ManagedInstanceUpdateStatus } from '@xmcl/runtime-api'
 import { randomUUID } from 'crypto'
 import { createReadStream } from 'fs'
 import { mkdir, rename, unlink, writeFile } from 'fs-extra'
@@ -15,7 +15,7 @@ import { missing } from '../util/fs'
 import { isValidUrl } from '../util/url'
 import { writeZipFile } from '../util/zip'
 import { ZipFile } from 'yazl'
-import { LoMUpdateService } from './LoMUpdateService'
+import { ManagedInstanceUpdateService } from './ManagedInstanceUpdateService'
 
 function joinFileApiUrl(base: string, relativePath: string): string {
   const normalizedBase = base.endsWith('/') ? base : `${base}/`
@@ -32,24 +32,24 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
 
   private async getAccessToken(userId: string): Promise<string> { throw new Error('Unimplemented') }
 
-  private async getLoMUpdater(): Promise<LoMUpdateService> {
-    return this.app.registry.getOrCreate(LoMUpdateService)
+  private async getManagedUpdater(): Promise<ManagedInstanceUpdateService> {
+    return this.app.registry.getOrCreate(ManagedInstanceUpdateService)
   }
 
-  async checkLoMUpdate(path: string): Promise<LoMUpdateStatus> {
-    return (await this.getLoMUpdater()).check(path)
+  async checkManagedInstanceUpdate(path: string): Promise<ManagedInstanceUpdateStatus> {
+    return (await this.getManagedUpdater()).check(path)
   }
 
-  async applyLoMUpdate(path: string): Promise<LoMUpdateResult> {
-    return (await this.getLoMUpdater()).update(path)
+  async applyManagedInstanceUpdate(path: string): Promise<ManagedInstanceUpdateResult> {
+    return (await this.getManagedUpdater()).update(path)
   }
 
-  async cancelLoMUpdate(path: string): Promise<boolean> {
-    return (await this.getLoMUpdater()).cancel(path)
+  async cancelManagedInstanceUpdate(path: string): Promise<boolean> {
+    return (await this.getManagedUpdater()).cancel(path)
   }
 
-  async getLoMUpdateProgress(): Promise<LoMUpdateProgress> {
-    return (await this.getLoMUpdater()).getProgress()
+  async getManagedInstanceUpdateProgress(path: string): Promise<ManagedInstanceUpdateProgress> {
+    return (await this.getManagedUpdater()).getProgress(path)
   }
 
   @Singleton((o) => o.path)
