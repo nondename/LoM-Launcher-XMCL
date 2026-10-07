@@ -1156,6 +1156,9 @@ importers:
       lodash.debounce:
         specifier: ^4.0.8
         version: 4.0.8
+      lodash.throttle:
+        specifier: ^4.1.1
+        version: 4.1.1
       node-abi:
         specifier: 3.60.0
         version: 3.60.0

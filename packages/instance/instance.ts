@@ -24,6 +24,32 @@ export type RuntimeVersions = z.infer<typeof RuntimeVersionsSchema>
 export type PartialRuntimeVersions = Partial<RuntimeVersions> & { minecraft: string }
 
 /**
+ * Metadata that marks an instance as remotely managed by the launcher vendor.
+ *
+ * Ordinary user-created XMCL instances do not have this field. Managed update
+ * code must use this identity instead of inferring ownership from a display
+ * name, runtime version, or filesystem path.
+ */
+export const ManagedInstanceSchema = z.object({
+  /** Update provider implemented by the launcher runtime. */
+  provider: z.string().min(1),
+  /** Stable profile identifier owned by the provider. */
+  profileId: z.string().min(1),
+  /** Manifest used to resolve the provider-owned files for this instance. */
+  manifestUrl: z.string().url(),
+  /** Optional release channel such as stable/dev. */
+  channel: z.string().min(1).optional(),
+  /** Optional Java requirement declared by the managed profile. */
+  java: z.object({
+    majorVersion: z.number().int().positive(),
+    /** Mojang runtime component when the profile needs an explicit installer target. */
+    component: z.string().min(1).optional(),
+  }).optional(),
+})
+
+export type ManagedInstance = z.infer<typeof ManagedInstanceSchema>
+
+/**
  * The edition of Minecraft an instance targets.
  *
  * - `java`: the classic Java Edition launched through a JVM (the default).
@@ -304,6 +330,8 @@ export const InstanceDataSchema = z.object({
     .catch(undefined),
   /** The upstream data source for this instance */
   upstream: InstanceUpstreamSchema.optional().catch(undefined),
+  /** Vendor-managed profile metadata. Absent for normal user-created instances. */
+  managed: ManagedInstanceSchema.optional().catch(undefined),
   /**
    * Remote SSH server admin connection profile for this instance's dedicated
    * server. Absent when the instance has no remote target configured.

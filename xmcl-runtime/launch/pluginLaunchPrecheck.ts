@@ -11,13 +11,14 @@ import { ensureDir, move, stat, unlink } from 'fs-extra'
 import { join } from 'path'
 import { LauncherAppPlugin, kGameDataPath } from '~/app'
 import { InstanceService } from '~/instance'
-import { LoMUpdateService } from '~/instanceIO'
+import { ManagedInstanceUpdateService } from '~/instanceIO/ManagedInstanceUpdateService'
 import { VersionInstallService } from '~/install/InstallService'
 import { isLinkTo, readlinkSafe } from '~/instance/utils/readLinkSafe'
 import { getManagedJavaComponent, JavaService, JavaValidation } from '~/java'
 import { LaunchService } from '~/launch'
 import { PeerService } from '~/peer'
 import { LocalSkinService } from '~/user/LocalSkinService'
+import { shouldRunManagedInstanceUpdate } from './managedInstanceLaunch'
 import { linkOrCopyDirectory, missing } from '~/util/fs'
 
 export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
@@ -36,20 +37,29 @@ export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
   })
 
   launchService.registerMiddleware({
-    name: 'lom-modpack-update',
+    name: 'managed-instance-update',
     async onBeforeLaunch(input, payload) {
       if (payload.side !== 'client') return
-      logger.log(`[LoM Updater] Pre-launch check for ${input.gameDirectory}`)
+
+      const instanceService = await app.registry.get(InstanceService)
+      const instance = instanceService.state.all[input.gameDirectory]
+
+      // Ordinary XMCL instances are entirely user-owned. Never invoke a
+      // managed provider for them, even if their Minecraft/Forge versions or
+      // display name happen to match an official profile.
+      if (!shouldRunManagedInstanceUpdate(instance)) return
+
+      logger.log(`[Managed Updater] Pre-launch check for ${input.gameDirectory} provider=${instance.managed.provider} profile=${instance.managed.profileId}`)
       try {
-        const updater = await app.registry.getOrCreate(LoMUpdateService)
+        const updater = await app.registry.getOrCreate(ManagedInstanceUpdateService)
         const result = await updater.update(input.gameDirectory)
-        logger.log(`[LoM Updater] Pre-launch update complete: version=${result.version}, changed=${result.changed}, deleted=${result.deleted}`)
+        logger.log(`[Managed Updater] Pre-launch update complete: version=${result.version}, changed=${result.changed}, deleted=${result.deleted}`)
       } catch (e) {
         const error = e instanceof Error ? e : new Error(String(e))
         logger.error(error)
         throw new LaunchException(
-          { type: 'launchPreExecuteCommandFailed', command: 'LoM Modpack Update', error: error.message },
-          `LoM modpack update failed: ${error.message}`,
+          { type: 'launchPreExecuteCommandFailed', command: 'Managed Instance Update', error: error.message },
+          `Managed instance update failed: ${error.message}`,
           { cause: error },
         )
       }

@@ -12,6 +12,14 @@ export type LoMManifest = {
   version: string
   files: LoMManifestFile[]
   delete?: string[]
+  /**
+   * Provider-owned runtime files installed into XMCL's shared game-data root.
+   * These are cache-like files (Forge libraries/version metadata) and are
+   * verified/overwritten but never automatically deleted.
+   */
+  runtimeFiles?: LoMManifestFile[]
+  /** Local version id made available after runtimeFiles are installed. */
+  runtimeVersion?: string
 }
 
 type DistributionArtifact = {
@@ -22,6 +30,7 @@ type DistributionArtifact = {
 }
 
 type DistributionModule = {
+  id?: unknown
   type?: unknown
   artifact?: DistributionArtifact
   subModules?: unknown
@@ -39,6 +48,12 @@ type Distribution = {
   version?: unknown
   servers?: unknown
   delete?: unknown
+}
+
+type DistributionCollection = {
+  files: Map<string, LoMManifestFile>
+  runtimeFiles: Map<string, LoMManifestFile>
+  runtimeVersion?: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,18 +89,63 @@ function normalizeArtifactPath(artifact: DistributionArtifact, sourceUrl: string
   return undefined
 }
 
-function validPackPath(path: string): boolean {
+function isSafeRelativePath(path: string): boolean {
   if (!path || path.startsWith('/') || path.includes('\0')) return false
   const parts = path.split('/')
-  if (parts.some((part) => !part || part === '.' || part === '..')) return false
-  // Forge libraries are already installed by XMCL's native version installer.
-  // They are present in the Helios distribution under repo/, but must not be
-  // copied into the game instance as normal pack files.
+  return !parts.some((part) => !part || part === '.' || part === '..')
+}
+
+function validPackPath(path: string): boolean {
+  if (!isSafeRelativePath(path)) return false
+  // Runtime artifacts belong to XMCL's shared game-data root, never inside a
+  // particular instance directory.
   if (path === 'repo' || path.startsWith('repo/')) return false
   return true
 }
 
-function collectDistributionModules(modules: unknown, sourceUrl: string, files: Map<string, LoMManifestFile>) {
+function getRuntimeTargetPath(type: string, sourcePath: string): string | undefined {
+  if (!isSafeRelativePath(sourcePath)) return undefined
+
+  if (type === 'VersionManifest' && sourcePath.startsWith('repo/versions/')) {
+    const target = sourcePath.slice('repo/'.length)
+    return target.startsWith('versions/') && isSafeRelativePath(target) ? target : undefined
+  }
+
+  if ((type === 'Library' || type === 'ForgeHosted') && sourcePath.startsWith('repo/lib/')) {
+    const relativeLibrary = sourcePath.slice('repo/lib/'.length)
+    const target = `libraries/${relativeLibrary}`
+    return isSafeRelativePath(target) ? target : undefined
+  }
+
+  return undefined
+}
+
+function toManifestFile(
+  artifact: DistributionArtifact,
+  path: string,
+  sourceUrl: string,
+): LoMManifestFile {
+  const md5 = typeof artifact.MD5 === 'string' && /^[a-f0-9]{32}$/i.test(artifact.MD5)
+    ? artifact.MD5.toLowerCase()
+    : undefined
+  const size = typeof artifact.size === 'number' && Number.isFinite(artifact.size) && artifact.size >= 0
+    ? artifact.size
+    : undefined
+
+  return {
+    path,
+    url: typeof artifact.url === 'string' ? new URL(artifact.url, sourceUrl).toString() : undefined,
+    size,
+    hash: md5,
+    hashAlgorithm: md5 ? 'md5' : undefined,
+  }
+}
+
+function collectDistributionModules(
+  modules: unknown,
+  sourceUrl: string,
+  collection: DistributionCollection,
+) {
   if (!Array.isArray(modules)) return
 
   for (const value of modules) {
@@ -94,26 +154,35 @@ function collectDistributionModules(modules: unknown, sourceUrl: string, files: 
     const type = typeof module.type === 'string' ? module.type : ''
     const artifact = isRecord(module.artifact) ? module.artifact as DistributionArtifact : undefined
 
-    if ((type === 'ForgeMod' || type === 'File') && artifact && typeof artifact.url === 'string') {
-      const path = normalizeArtifactPath(artifact, sourceUrl)
-      if (path && validPackPath(path)) {
-        const md5 = typeof artifact.MD5 === 'string' && /^[a-f0-9]{32}$/i.test(artifact.MD5)
-          ? artifact.MD5.toLowerCase()
-          : undefined
-        const size = typeof artifact.size === 'number' && Number.isFinite(artifact.size) && artifact.size >= 0
-          ? artifact.size
-          : undefined
-        files.set(path, {
-          path,
-          url: new URL(artifact.url, sourceUrl).toString(),
-          size,
-          hash: md5,
-          hashAlgorithm: md5 ? 'md5' : undefined,
-        })
+    if (artifact && typeof artifact.url === 'string') {
+      const sourcePath = normalizeArtifactPath(artifact, sourceUrl)
+
+      if ((type === 'ForgeMod' || type === 'File') && sourcePath && validPackPath(sourcePath)) {
+        collection.files.set(sourcePath, toManifestFile(artifact, sourcePath, sourceUrl))
+      }
+
+      if (sourcePath) {
+        const runtimePath = getRuntimeTargetPath(type, sourcePath)
+        if (runtimePath) {
+          collection.runtimeFiles.set(runtimePath, toManifestFile(artifact, runtimePath, sourceUrl))
+          if (type === 'VersionManifest') {
+            // The Helios module id is not necessarily the local XMCL version
+            // id. For Forge it is currently "1.20.1-47.4.22", while the actual
+            // mirrored version directory/json is "1.20.1-forge-47.4.22".
+            // The on-disk target path is authoritative because VersionService
+            // resolves versions by that directory/json id.
+            const match = /^versions\/([^/]+)\/([^/]+)\.json$/.exec(runtimePath)
+            if (match && match[1] === match[2]) {
+              collection.runtimeVersion = match[1]
+            } else if (typeof module.id === 'string' && module.id) {
+              collection.runtimeVersion = module.id
+            }
+          }
+        }
       }
     }
 
-    collectDistributionModules(module.subModules, sourceUrl, files)
+    collectDistributionModules(module.subModules, sourceUrl, collection)
   }
 }
 
@@ -173,21 +242,24 @@ export function normalizeLoMManifest(raw: unknown, sourceUrl: string): LoMManife
       : undefined
   if (!version) throw new Error('[LoM Updater] Invalid distribution: version is missing')
 
-  const files = new Map<string, LoMManifestFile>()
-  collectDistributionModules(server.modules, sourceUrl, files)
+  const collection: DistributionCollection = {
+    files: new Map<string, LoMManifestFile>(),
+    runtimeFiles: new Map<string, LoMManifestFile>(),
+  }
+  collectDistributionModules(server.modules, sourceUrl, collection)
 
   // options.txt is intentionally stored at the pack repository root and is
   // not emitted by the current Helios distribution generator. Include it so
   // a fresh LoM install receives our Russian/default client settings instead
   // of the vanilla English options generated by Minecraft.
-  if (!files.has('options.txt')) {
-    files.set('options.txt', {
+  if (!collection.files.has('options.txt')) {
+    collection.files.set('options.txt', {
       path: 'options.txt',
       url: new URL('options.txt', sourceUrl).toString(),
     })
   }
 
-  if (files.size <= 1) {
+  if (collection.files.size <= 1) {
     throw new Error('[LoM Updater] Distribution contains no game files')
   }
 
@@ -200,12 +272,14 @@ export function normalizeLoMManifest(raw: unknown, sourceUrl: string): LoMManife
 
   return {
     version,
-    files: [...files.values()],
+    files: [...collection.files.values()],
     delete: [...new Set([
       // Cleanup the marker left by the pre-v0.1 production build which was
       // accidentally wired to the updater test manifest.
       'config/lom-updater-test.txt',
       ...deletePaths,
     ])],
+    runtimeFiles: [...collection.runtimeFiles.values()],
+    runtimeVersion: collection.runtimeVersion,
   }
 }
