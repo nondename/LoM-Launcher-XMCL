@@ -4,7 +4,8 @@ import { Inject, LauncherAppKey } from '~/app'
 import { InstanceService } from '~/instance'
 import { AbstractService } from '~/service'
 import { LauncherApp } from '../app/LauncherApp'
-import { LoMUpdateService, type LoMUpdateProgress, type LoMUpdateResult, type LoMUpdateStatus } from './LoMUpdateService'
+import { LoMUpdateService } from './LoMUpdateService'
+import type { ManagedInstanceUpdateProvider } from './ManagedInstanceUpdateProvider'
 
 type ManagedContext = {
   instancePath: string
@@ -36,7 +37,7 @@ export class ManagedInstanceUpdateService extends AbstractService {
     return { instancePath, managed: instance.managed }
   }
 
-  private async getProvider(context: ManagedContext) {
+  private async getProvider(context: ManagedContext): Promise<ManagedInstanceUpdateProvider> {
     switch (context.managed.provider) {
       case 'lom-distribution':
         return this.app.registry.getOrCreate(LoMUpdateService)
@@ -45,23 +46,16 @@ export class ManagedInstanceUpdateService extends AbstractService {
     }
   }
 
-  private identity(managed: ManagedInstance) {
-    return {
-      provider: managed.provider,
-      profileId: managed.profileId,
-    }
-  }
-
   async check(instancePath: string): Promise<LoMUpdateStatus> {
     const context = this.resolveContext(instancePath)
     const provider = await this.getProvider(context)
-    return provider.check(instancePath, context.managed.manifestUrl, this.identity(context.managed))
+    return provider.check(instancePath, context.managed)
   }
 
   async update(instancePath: string): Promise<LoMUpdateResult> {
     const context = this.resolveContext(instancePath)
     const provider = await this.getProvider(context)
-    return provider.update(instancePath, context.managed.manifestUrl, this.identity(context.managed))
+    return provider.update(instancePath, context.managed)
   }
 
   async cancel(instancePath: string): Promise<boolean> {
