@@ -75,7 +75,7 @@ describe('LoM distribution adapter', () => {
       }),
     ]))
     expect(manifest.files.some((file) => file.path.startsWith('repo/'))).toBe(false)
-    expect(manifest.runtimeVersion).toBe('1.20.1-47.4.22')
+    expect(manifest.runtimeVersion).toBe('1.20.1-forge-47.4.22')
     expect(manifest.runtimeFiles).toEqual(expect.arrayContaining([
       expect.objectContaining({
         path: 'libraries/net/minecraftforge/lowcodelanguage/1.20.1-47.4.22/lowcodelanguage-1.20.1-47.4.22.jar',
