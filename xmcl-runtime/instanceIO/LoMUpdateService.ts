@@ -183,8 +183,15 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
     const manifest = await this.fetchManifest(managed.manifestUrl)
     const state = await this.readUpdateState(instancePath, { provider: managed.provider, profileId: managed.profileId })
     const installedVersion = typeof state.version === 'string' ? state.version : undefined
+    const initializedManagedState =
+      state.provider === managed.provider &&
+      state.profileId === managed.profileId &&
+      Array.isArray(state.managedFiles)
     return {
-      available: installedVersion !== manifest.version,
+      // A profile migrated from the legacy LoM updater must run once even when
+      // the pack revision itself did not change. That first managed pass writes
+      // ownership state and installs the provider-owned Forge runtime cache.
+      available: installedVersion !== manifest.version || !initializedManagedState,
       remoteVersion: manifest.version,
       installedVersion,
     }
