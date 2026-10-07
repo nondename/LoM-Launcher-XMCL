@@ -42,8 +42,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Test LoM distribution adapter
-        run: pnpm vitest run xmcl-runtime/instanceIO/lomDistribution.test.ts
+      - name: Test managed instance boundary
+        run: pnpm vitest run packages/instance/managed.test.ts xmcl-keystone-ui/src/composables/lomProfile.test.ts xmcl-runtime/instanceIO/lomDistribution.test.ts
 
       - name: Validate live LoM pack distribution and direct download
         shell: pwsh
