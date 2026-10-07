@@ -8,6 +8,7 @@ import { kTasks, TaskInstance, Tasks } from '~/infra'
 import { kDownloadOptions } from '~/network'
 import { AbstractService } from '~/service'
 import { VersionService } from '~/launch/VersionService'
+import { VersionMetadataService } from '~/install/VersionMetadataService'
 import { LauncherApp } from '../app/LauncherApp'
 import { LoMManifest, LoMManifestFile, normalizeLoMManifest } from './lomDistribution'
 import { isLoMTextFile, LoMIntegrityError, validateLoMFileBytes } from './lomFileIntegrity'
@@ -164,6 +165,45 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
     // runtime writes. The provider/profile identity selects a launcher-owned
     // source. The environment override is retained for explicit dev/test use.
     return process.env.LOM_UPDATE_MANIFEST_URL || DEFAULT_LOM_MANIFEST_URL
+  }
+
+  private async ensureInheritedMinecraftMetadata(runtimeVersion: string) {
+    const runtimeJsonPath = this.getPath('versions', runtimeVersion, `${runtimeVersion}.json`)
+    const runtimeJson = JSON.parse(await readFile(runtimeJsonPath, 'utf8')) as { inheritsFrom?: unknown }
+    const parentVersion = typeof runtimeJson.inheritsFrom === 'string' ? runtimeJson.inheritsFrom : ''
+    if (!parentVersion) return
+
+    const parentJsonPath = this.getPath('versions', parentVersion, `${parentVersion}.json`)
+    try {
+      const current = JSON.parse(await readFile(parentJsonPath, 'utf8')) as { id?: unknown }
+      if (current.id === parentVersion) return
+    } catch {
+      // Missing/corrupt parent metadata: restore it from Mojang metadata below.
+    }
+
+    const metadataService = await this.app.registry.getOrCreate(VersionMetadataService)
+    const versions = await metadataService.getMinecraftVersions()
+    const parent = versions.versions.find((version) => version.id === parentVersion)
+    if (!parent?.url) {
+      throw new Error(`[LoM Updater] Cannot resolve inherited Minecraft metadata: ${parentVersion}`)
+    }
+
+    const response = await this.app.fetch(parent.url, { cache: 'no-store' })
+    if (!response.ok) {
+      throw new Error(`[LoM Updater] Minecraft metadata HTTP ${response.status}: ${parent.url}`)
+    }
+    const data = Buffer.from(await response.arrayBuffer())
+    const parsed = JSON.parse(data.toString('utf8')) as { id?: unknown }
+    if (parsed.id !== parentVersion) {
+      throw new Error(`[LoM Updater] Unexpected Minecraft metadata id: ${String(parsed.id)}`)
+    }
+
+    const temp = `${parentJsonPath}.lom-update`
+    await mkdir(dirname(parentJsonPath), { recursive: true })
+    await writeFile(temp, data)
+    await unlink(parentJsonPath).catch(() => undefined)
+    await rename(temp, parentJsonPath)
+    this.log(`[LoM Updater] Installed inherited Minecraft metadata ${parentVersion}`)
   }
 
   private async fetchManifest(manifestUrl: string, signal?: AbortSignal): Promise<LoMManifest> {
@@ -570,6 +610,13 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
       }, null, 2), 'utf8')
 
       if (manifest.runtimeVersion) {
+        // Forge's version profile inherits the vanilla Minecraft profile. On a
+        // completely fresh launcher the parent JSON does not exist yet, which
+        // would make VersionService reject our mirrored Forge profile and send
+        // the native installer back to Forge Maven. Seed only that tiny Mojang
+        // metadata JSON here; client.jar/assets/vanilla libraries remain on the
+        // normal XMCL/Mojang installation path.
+        await this.ensureInheritedMinecraftMetadata(manifest.runtimeVersion)
         const versionService = await this.app.registry.getOrCreate(VersionService)
         await versionService.refreshVersion(manifest.runtimeVersion)
       }
