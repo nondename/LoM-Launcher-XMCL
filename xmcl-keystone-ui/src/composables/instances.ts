@@ -6,7 +6,7 @@ import { useService } from './service'
 import { useState } from './syncableState'
 import { InstanceOrGroupData } from './instanceGroup'
 import { kUserContext } from './user'
-import { isLegacyLoMProfile, LOM_COLD_START_PENDING_KEY, LOM_LEGACY_MANAGED_INSTANCE_PATHS_KEY, LOM_MANAGED_INSTANCE, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
+import { isLegacyLoMProfile, LITE_MANAGED_INSTANCE, LITE_PROFILE_NAME, LITE_PROFILE_RUNTIME, LOM_COLD_START_PENDING_KEY, LOM_LEGACY_MANAGED_INSTANCE_PATHS_KEY, LOM_MANAGED_INSTANCE, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
 
 export const kInstances: InjectionKey<ReturnType<typeof useInstances>> = Symbol('Instances')
 
@@ -201,6 +201,36 @@ export function useInstances() {
           disableAuthlibInjector: true,
         })
         coldStartPendingPath.value = ''
+      }
+
+      // Lite is a second launcher-owned profile. It intentionally starts with
+      // only the shared Forge runtime; its own distribution controls any files
+      // we may add later without inheriting the main LoM pack.
+      let litePath = newVal.instances.find((candidate) =>
+        candidate.managed?.provider === LITE_MANAGED_INSTANCE.provider &&
+        candidate.managed.profileId === LITE_MANAGED_INSTANCE.profileId,
+      )?.path
+
+      if (litePath) {
+        const liteProfile = newVal.instances.find((candidate) => candidate.path === litePath)
+        const managedChanged = JSON.stringify(liteProfile?.managed) !== JSON.stringify(LITE_MANAGED_INSTANCE)
+        const runtimeChanged =
+          liteProfile?.runtime.minecraft !== LITE_PROFILE_RUNTIME.minecraft ||
+          liteProfile?.runtime.forge !== LITE_PROFILE_RUNTIME.forge
+        if (managedChanged || runtimeChanged) {
+          await editInstance({
+            instancePath: litePath,
+            ...(managedChanged ? { managed: JSON.parse(JSON.stringify(LITE_MANAGED_INSTANCE)) } : {}),
+            ...(runtimeChanged ? { runtime: { ...LITE_PROFILE_RUNTIME } } : {}),
+          })
+        }
+      } else {
+        litePath = await createInstance({
+          name: LITE_PROFILE_NAME,
+          runtime: { ...LITE_PROFILE_RUNTIME },
+          managed: JSON.parse(JSON.stringify(LITE_MANAGED_INSTANCE)),
+          disableAuthlibInjector: true,
+        })
       }
 
       if (wasEmpty) {
