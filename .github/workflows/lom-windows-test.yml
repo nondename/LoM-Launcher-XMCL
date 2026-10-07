@@ -41,8 +41,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Test LoM distribution adapter
-        run: pnpm vitest run xmcl-runtime/instanceIO/lomDistribution.test.ts
+      - name: Test managed instance boundary
+        run: pnpm vitest run packages/instance/managed.test.ts xmcl-keystone-ui/src/composables/lomProfile.test.ts xmcl-runtime/launch/managedInstanceLaunch.test.ts xmcl-runtime/instanceIO/lomDistribution.test.ts
 
       - name: Validate live LoM pack distribution and direct download
         shell: pwsh
@@ -59,8 +59,28 @@ jobs:
             const manifest = normalizeLoMManifest(await response.json(), source)
             const activeJars = manifest.files.filter((file) => file.path.startsWith('mods/') && file.path.endsWith('.jar'))
             const disabledJars = manifest.files.filter((file) => file.path.startsWith('mods/') && file.path.endsWith('.jar.deactivation'))
-            console.log(`LoM distribution version=${manifest.version} files=${manifest.files.length} activeMods=${activeJars.length} disabledMods=${disabledJars.length}`)
+            const runtimeFiles = manifest.runtimeFiles ?? []
+            console.log(`LoM distribution version=${manifest.version} files=${manifest.files.length} activeMods=${activeJars.length} disabledMods=${disabledJars.length} runtimeFiles=${runtimeFiles.length} runtimeVersion=${manifest.runtimeVersion ?? 'none'}`)
             if (activeJars.length < 100) throw new Error(`Suspiciously small LoM mod set: ${activeJars.length}`)
+            if (runtimeFiles.length < 30) throw new Error(`Suspiciously small LoM runtime set: ${runtimeFiles.length}`)
+            if (manifest.runtimeVersion !== '1.20.1-forge-47.4.22') throw new Error(`Unexpected LoM runtime version: ${manifest.runtimeVersion}`)
+            const runtimeManifest = runtimeFiles.find((file) => file.path === 'versions/1.20.1-forge-47.4.22/1.20.1-forge-47.4.22.json')
+            if (!runtimeManifest?.url || !runtimeManifest.hash) throw new Error('Managed Forge version manifest missing from live distribution')
+            const runtimeResponse = await fetch(runtimeManifest.url, { cache: 'no-store' })
+            if (!runtimeResponse.ok) throw new Error(`Managed Forge version manifest HTTP ${runtimeResponse.status}`)
+            const runtimeData = Buffer.from(await runtimeResponse.arrayBuffer())
+            const runtimeValidation = validateLoMFileBytes(runtimeData, runtimeManifest)
+            if (!runtimeValidation.valid) throw new Error(`Managed Forge version manifest failed integrity validation: ${JSON.stringify(runtimeValidation)}`)
+            const runtimeProfile = JSON.parse(runtimeData.toString('utf8'))
+            const runtimePaths = new Set(runtimeFiles.map((file) => file.path))
+            const missingRuntimeLibraries = (runtimeProfile.libraries ?? [])
+              .map((library) => library?.downloads?.artifact?.path)
+              .filter((path) => typeof path === 'string')
+              .map((path) => `libraries/${path}`)
+              .filter((path) => !runtimePaths.has(path))
+            if (missingRuntimeLibraries.length > 0) {
+              throw new Error(`Managed Forge runtime is incomplete: ${missingRuntimeLibraries.join(', ')}`)
+            }
             if (!manifest.files.some((file) => file.path === 'options.txt')) throw new Error('options.txt missing from normalized manifest')
 
             const securityCraft = manifest.files.find((file) => file.path.includes('SecurityCraft'))

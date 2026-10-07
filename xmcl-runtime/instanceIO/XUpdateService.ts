@@ -1,6 +1,6 @@
 import { checksum } from '@xmcl/core'
 import type { InstanceFile } from '@xmcl/instance'
-import { InstanceIOException, XUpdateServiceKey, type XUpdateService as IXUpdateService, type InstanceManifest, type InstanceUpdate, type SetInstanceManifestOptions, type LoMUpdateProgress, type LoMUpdateResult, type LoMUpdateStatus } from '@xmcl/runtime-api'
+import { InstanceIOException, XUpdateServiceKey, type XUpdateService as IXUpdateService, type InstanceManifest, type InstanceUpdate, type SetInstanceManifestOptions, type ManagedInstanceUpdateProgress, type ManagedInstanceUpdateResult, type ManagedInstanceUpdateStatus } from '@xmcl/runtime-api'
 import { randomUUID } from 'crypto'
 import { createReadStream } from 'fs'
 import { appendFile, mkdir, rename, unlink, writeFile } from 'fs-extra'
@@ -15,11 +15,7 @@ import { missing } from '../util/fs'
 import { isValidUrl } from '../util/url'
 import { writeZipFile } from '../util/zip'
 import { ZipFile } from 'yazl'
-import { LoMUpdateService } from './LoMUpdateService'
-
-const LOM_PROFILE_NAME = 'Legends of Medieval'
-const LOM_MINECRAFT_VERSION = '1.20.1'
-const LOM_FORGE_VERSION = '47.4.22'
+import { ManagedInstanceUpdateService } from './ManagedInstanceUpdateService'
 
 function joinFileApiUrl(base: string, relativePath: string): string {
   const normalizedBase = base.endsWith('/') ? base : `${base}/`
@@ -47,52 +43,34 @@ export class XUpdateService extends AbstractService implements IXUpdateService {
     }
   }
 
-  private async getLoMUpdater(): Promise<LoMUpdateService> {
-    return this.app.registry.getOrCreate(LoMUpdateService)
+  private async getManagedUpdater(): Promise<ManagedInstanceUpdateService> {
+    return this.app.registry.getOrCreate(ManagedInstanceUpdateService)
   }
 
   private describeInstance(path: string) {
     const instance = this.instanceService.state.all[path]
     return instance
-      ? `path=${path} name=${JSON.stringify(instance.name)} edition=${instance.edition ?? 'java'} minecraft=${instance.runtime.minecraft ?? '-'} forge=${instance.runtime.forge ?? '-'} fileApi=${instance.fileApi ?? '-'}`
+      ? `path=${path} name=${JSON.stringify(instance.name)} edition=${instance.edition ?? 'java'} minecraft=${instance.runtime.minecraft ?? '-'} forge=${instance.runtime.forge ?? '-'} managed=${instance.managed ? `${instance.managed.provider}/${instance.managed.profileId}` : '-'} fileApi=${instance.fileApi ?? '-'}`
       : `path=${path} instance=MISSING`
   }
 
-  private assertLoMInstance(path: string) {
-    const instance = this.instanceService.state.all[path]
-    const isLoM = !!instance &&
-      instance.edition !== 'bedrock' &&
-      instance.name === LOM_PROFILE_NAME &&
-      instance.runtime.minecraft === LOM_MINECRAFT_VERSION &&
-      instance.runtime.forge === LOM_FORGE_VERSION
-
-    if (!isLoM) {
-      void this.diagnostic(`WARN REJECT dedicated updater ${this.describeInstance(path)}`)
-      throw new Error(`LoM updater cannot operate on unrelated instance: ${path}`)
-    }
-    void this.diagnostic(`ACCEPT dedicated updater ${this.describeInstance(path)}`)
+  async checkManagedInstanceUpdate(path: string): Promise<ManagedInstanceUpdateStatus> {
+    void this.diagnostic(`checkManagedInstanceUpdate requested ${this.describeInstance(path)}`)
+    return (await this.getManagedUpdater()).check(path)
   }
 
-  async checkLoMUpdate(path: string): Promise<LoMUpdateStatus> {
-    void this.diagnostic(`checkLoMUpdate requested ${this.describeInstance(path)}`)
-    this.assertLoMInstance(path)
-    return (await this.getLoMUpdater()).check(path)
+  async applyManagedInstanceUpdate(path: string): Promise<ManagedInstanceUpdateResult> {
+    void this.diagnostic(`applyManagedInstanceUpdate requested ${this.describeInstance(path)}`)
+    return (await this.getManagedUpdater()).update(path)
   }
 
-  async applyLoMUpdate(path: string): Promise<LoMUpdateResult> {
-    void this.diagnostic(`applyLoMUpdate requested ${this.describeInstance(path)}`)
-    this.assertLoMInstance(path)
-    return (await this.getLoMUpdater()).update(path)
+  async cancelManagedInstanceUpdate(path: string): Promise<boolean> {
+    void this.diagnostic(`cancelManagedInstanceUpdate requested ${this.describeInstance(path)}`)
+    return (await this.getManagedUpdater()).cancel(path)
   }
 
-  async cancelLoMUpdate(path: string): Promise<boolean> {
-    void this.diagnostic(`cancelLoMUpdate requested ${this.describeInstance(path)}`)
-    this.assertLoMInstance(path)
-    return (await this.getLoMUpdater()).cancel(path)
-  }
-
-  async getLoMUpdateProgress(): Promise<LoMUpdateProgress> {
-    return (await this.getLoMUpdater()).getProgress()
+  async getManagedInstanceUpdateProgress(path: string): Promise<ManagedInstanceUpdateProgress> {
+    return (await this.getManagedUpdater()).getProgress(path)
   }
 
   @Singleton((o) => o.path)
