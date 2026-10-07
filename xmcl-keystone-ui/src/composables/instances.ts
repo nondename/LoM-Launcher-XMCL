@@ -171,6 +171,24 @@ export function useInstances() {
         }
       }
 
+      // Launcher updates own the managed profile definition. Existing managed
+      // instances inherit source/channel/Java/runtime changes here; ordinary
+      // XMCL instances never enter this reconciliation path.
+      if (managedPath) {
+        const managedProfile = newVal.instances.find((candidate) => candidate.path === managedPath)
+        const managedChanged = JSON.stringify(managedProfile?.managed) !== JSON.stringify(LOM_MANAGED_INSTANCE)
+        const runtimeChanged =
+          managedProfile?.runtime.minecraft !== LOM_PROFILE_RUNTIME.minecraft ||
+          managedProfile?.runtime.forge !== LOM_PROFILE_RUNTIME.forge
+        if (managedChanged || runtimeChanged) {
+          await editInstance({
+            instancePath: managedPath,
+            ...(managedChanged ? { managed: JSON.parse(JSON.stringify(LOM_MANAGED_INSTANCE)) } : {}),
+            ...(runtimeChanged ? { runtime: { ...LOM_PROFILE_RUNTIME } } : {}),
+          })
+        }
+      }
+
       // The official profile exists independently from user-created XMCL
       // instances. Re-provision its lightweight instance metadata when missing,
       // but never auto-download the pack or replace the user's current
