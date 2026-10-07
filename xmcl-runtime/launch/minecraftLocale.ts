@@ -67,7 +67,7 @@ export function resolveMinecraftLocale(launcherLocale: string, minecraftVersion:
 export function patchMinecraftLanguageOption(content: string, locale: string) {
   const eol = content.includes('\r\n') ? '\r\n' : '\n'
   const line = `lang:${locale}`
-  const langPattern = /^lang:.*$/m
+  const langPattern = /^lang:[^\r\n]*(?=\r?$)/m
 
   if (langPattern.test(content)) {
     return content.replace(langPattern, line)
