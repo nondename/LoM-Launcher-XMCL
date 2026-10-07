@@ -74,7 +74,7 @@ jobs:
           "channel=$channel" >> $env:GITHUB_OUTPUT
 
       - name: Run LoM regression tests
-        run: pnpm vitest run xmcl-runtime/infra/plugins/task.test.ts packages/instance/managed.test.ts xmcl-keystone-ui/src/composables/lomProfile.test.ts xmcl-runtime/launch/managedInstanceLaunch.test.ts xmcl-runtime/instanceIO/lomDistribution.test.ts
+        run: pnpm vitest run xmcl-runtime/infra/plugins/task.test.ts packages/instance/managed.test.ts xmcl-keystone-ui/src/composables/lomProfile.test.ts xmcl-runtime/launch/managedInstanceLaunch.test.ts xmcl-runtime/launch/minecraftLocale.test.ts xmcl-runtime/instanceIO/lomDistribution.test.ts
 
       - name: Build LoM Launcher
         shell: pwsh

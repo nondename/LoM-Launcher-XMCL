@@ -152,6 +152,7 @@ import SetupAppearance from './SetupAppearance.vue'
 import SetDataRoot from './SetupDataRoot.vue'
 import SetupFooter from './SetupFooter.vue'
 import SetLocale from './SetupLocale.vue'
+import localMapping from '../../../assets/locales.json'
 
 const emit = defineEmits(['ready'])
 const { validateDataDictionary, getEnvironment } = useService(BaseServiceKey)
@@ -184,12 +185,25 @@ const data = reactive({
   theme: 'system',
 })
 provide('setup', data)
+function resolveSupportedSetupLocale(candidate: string) {
+  const normalized = candidate.replace('_', '-')
+  const supported = Object.keys(localMapping)
+  const exact = supported.find((value) => value.toLowerCase() === normalized.toLowerCase())
+  if (exact) return exact
+
+  const language = normalized.split('-')[0].toLowerCase()
+  const languageOnly = supported.find((value) => value.toLowerCase() === language)
+  if (languageOnly) return languageOnly
+
+  const regional = supported.find((value) => value.toLowerCase().startsWith(language + '-'))
+  return regional ?? 'en'
+}
+
 bootstrap.preset().then(({ minecraftPath, defaultPath, locale: locale_, drives }) => {
   data.fetching = false
-  if (locale_.startsWith('en')) {
-    locale_ = 'en'
-  }
+  locale_ = resolveSupportedSetupLocale(locale_)
   locale.value = locale_
+  state.value?.localeSet(locale_)
   data.minecraftPath = minecraftPath
   data.instancePath = minecraftPath
   data.path = defaultPath
