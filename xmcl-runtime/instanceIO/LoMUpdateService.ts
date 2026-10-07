@@ -55,7 +55,10 @@ const MANAGED_STATE_FILE = '.managed-update.json'
 const LEGACY_STATE_FILE = '.lom-update.json'
 const DEFAULT_LOM_MANIFEST_URL =
   'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
+const DEFAULT_LITE_MANIFEST_URL =
+  'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/lite/distribution.json'
 const LOM_PROFILE_ID = 'legends-of-medieval'
+const LITE_PROFILE_ID = 'legends-of-medieval-lite'
 const MAX_DOWNLOAD_ATTEMPTS = 4
 const RETRY_BASE_DELAY_MS = 750
 const DOWNLOAD_PROGRESS_INTERVAL_MS = 100
@@ -158,14 +161,20 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
   }
 
   private resolveManifestUrl(managed: ManagedInstance) {
-    if (managed.provider !== 'lom-distribution' || managed.profileId !== LOM_PROFILE_ID) {
+    if (managed.provider !== 'lom-distribution') {
       throw new Error(`Unsupported LoM managed profile: ${managed.provider}/${managed.profileId}`)
     }
 
     // Never trust an arbitrary URL persisted in instance.json for shared
     // runtime writes. The provider/profile identity selects a launcher-owned
-    // source. The environment override is retained for explicit dev/test use.
-    return process.env.LOM_UPDATE_MANIFEST_URL || DEFAULT_LOM_MANIFEST_URL
+    // source, with separate explicit dev overrides for each official profile.
+    if (managed.profileId === LOM_PROFILE_ID) {
+      return process.env.LOM_UPDATE_MANIFEST_URL || DEFAULT_LOM_MANIFEST_URL
+    }
+    if (managed.profileId === LITE_PROFILE_ID) {
+      return process.env.LOM_LITE_UPDATE_MANIFEST_URL || DEFAULT_LITE_MANIFEST_URL
+    }
+    throw new Error(`Unsupported LoM managed profile: ${managed.provider}/${managed.profileId}`)
   }
 
   private async ensureInheritedMinecraftMetadata(runtimeVersion: string) {
@@ -222,7 +231,7 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
       return state
     } catch {
       // Migrate the version marker written by pre-managed LoM Launcher builds.
-      if (identity.provider === 'lom-distribution') {
+      if (identity.provider === 'lom-distribution' && identity.profileId === LOM_PROFILE_ID) {
         try {
           const legacy = JSON.parse(await readFile(join(instancePath, LEGACY_STATE_FILE), 'utf8')) as ManagedUpdateState
           return typeof legacy.version === 'string' ? { version: legacy.version } : {}
