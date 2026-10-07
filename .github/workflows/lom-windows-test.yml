@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - 'fix/**'
+      - 'release/**'
   workflow_dispatch:
 
 jobs:
