@@ -1,31 +1,30 @@
-# LoM Launcher v1.8.11-dev.1
+# LoM Launcher v1.8.11
 
-DEV-сборка для тестирования второго управляемого инстанса **Lite**.
+Стабильный релиз второго управляемого инстанса **Lite**.
 
 ## Lite
 
-- Добавлен отдельный managed-instance `Lite`.
-- Minecraft: 1.20.1.
-- Forge: 47.4.22.
-- Java: 17.
+- В лаунчере автоматически создаётся отдельный официальный инстанс `Lite`.
+- Minecraft 1.20.1 / Forge 47.4.22 / Java 17.
 - Managed profile ID: `legends-of-medieval-lite`.
-- Источник обновлений вынесен в отдельный публичный репозиторий `nondename/LoM_Lite`.
-- DEV-манифест: `dev/distribution.json`.
-- Начальное состояние Lite — чистый Forge без управляемых модов, конфигов, шейдеров, ресурспаков и `options.txt`.
+- Lite полностью изолирован от основной Legends of Medieval и обновляется из отдельного репозитория `nondename/LoM_Lite`.
+- Stable-манифест: `main/distribution.json`.
 
-## Изоляция управляемых сборок
+## Состав Lite 0.2.0
 
-- Основная Legends of Medieval и Lite имеют разные managed identity и разные источники манифестов.
-- Lite не наследует legacy update-state основной сборки.
-- Специальные правила основной LoM-сборки (seed `options.txt`, cleanup marker) не применяются к Lite.
-- Runtime-only manifest разрешён, поэтому Lite может существовать как чистый Forge-профиль.
+- Добавлены выбранные gameplay/QoL-моды, Create, BuildCraft CE, Iron's Spellbooks, Ice and Fire CE, MineColonies, biome/worldgen, Relics и survival-механики.
+- Добавлены обязательные библиотеки и зависимости выбранного набора.
+- Используются наши версии InkSpellBooks LoM Addon, Legendary Tabs, LoM Skin Loader, Map Atlases и изменённый GlitchCore.
+- В Lite не копируются лишние моды, шейдеры и resource packs основной сборки.
+- Файлы Lite закреплены на конкретной ревизии исходной LoM-сборки, поэтому последующие изменения main/dev не меняют Lite самопроизвольно.
 
-## Что проверить
+## Managed-инстансы
 
-- после запуска лаунчера рядом с основной сборкой появляется `Lite`;
-- Lite создаётся только один раз и не дублируется при следующих запусках;
-- запускается Minecraft 1.20.1 Forge 47.4.22;
-- в Lite не приезжают моды и конфиги основной Legends of Medieval;
-- обновление основной сборки не изменяет Lite и наоборот.
+- Legends of Medieval и Lite имеют разные managed identity и разные манифесты.
+- Обновление одной сборки не затрагивает другую.
+- Пользовательские XMCL-инстансы не получают LoM updater.
+- Существующий Lite автоматически переключается с DEV-манифеста на stable.
 
-> Это DEV prerelease. В stable изменения пока не выпускаются.
+## Обновление
+
+Пользователи LoM Launcher 1.8.10 получат 1.8.11 через встроенное обновление лаунчера.
