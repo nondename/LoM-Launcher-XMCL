@@ -34,6 +34,14 @@ export interface LaunchMenuItem {
 export const kLaunchButton: InjectionKey<ReturnType<typeof useLaunchButton>> =
   Symbol('LaunchButton')
 
+export function hasMismatchedInstanceSnapshot(
+  currentPath: string,
+  ...snapshots: Array<string | undefined>
+) {
+  return snapshots.filter((value): value is string => !!value)
+    .some((snapshotPath) => snapshotPath !== currentPath)
+}
+
 export function useLaunchButton() {
   const { show: showLaunchStatusDialog } = useDialog(LaunchStatusDialogKey)
 
@@ -179,12 +187,12 @@ export function useLaunchButton() {
     // Treat only an actually-present snapshot for another instance as stale.
     // Otherwise a perfectly installed vanilla/user instance can display
     // "Launch" while onClick silently returns forever.
-    const snapshots = [
+    return hasMismatchedInstanceSnapshot(
+      currentPath,
       instruction.value?.instance,
       instanceInstallStatus.value?.instance,
       javaStatus.value?.instance,
-    ].filter((value): value is string => !!value)
-    return snapshots.some((snapshotPath) => snapshotPath !== currentPath)
+    )
   })
 
   async function continueLoMInstall(instancePath: string) {
