@@ -1,14 +1,17 @@
 import { download, ProgressTrackerSingle, type DownloadBaseOptions } from '@xmcl/file-transfer'
+import type { ManagedInstance } from '@xmcl/instance'
 import { InstallInstanceTask } from '@xmcl/runtime-api'
 import { mkdir, readFile, rename, unlink, writeFile } from 'fs-extra'
 import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'path'
-import { Inject, LauncherAppKey } from '~/app'
+import { Inject, LauncherAppKey, kGameDataPath, type PathResolver } from '~/app'
 import { kTasks, TaskInstance, Tasks } from '~/infra'
 import { kDownloadOptions } from '~/network'
 import { AbstractService } from '~/service'
+import { VersionService } from '~/launch/VersionService'
 import { LauncherApp } from '../app/LauncherApp'
 import { LoMManifest, LoMManifestFile, normalizeLoMManifest } from './lomDistribution'
 import { isLoMTextFile, LoMIntegrityError, validateLoMFileBytes } from './lomFileIntegrity'
+import type { ManagedInstanceUpdateProvider } from './ManagedInstanceUpdateProvider'
 
 export type LoMUpdateResult = {
   version: string
@@ -123,7 +126,7 @@ async function waitForRetry(ms: number, signal: AbortSignal) {
   })
 }
 
-export class LoMUpdateService extends AbstractService {
+export class LoMUpdateService extends AbstractService implements ManagedInstanceUpdateProvider {
   private running = new Map<string, Promise<LoMUpdateResult>>()
   private controllers = new Map<string, AbortController>()
   private progress = new Map<string, LoMUpdateProgress>()
@@ -132,6 +135,7 @@ export class LoMUpdateService extends AbstractService {
     @Inject(LauncherAppKey) app: LauncherApp,
     @Inject(kTasks) private tasks: Tasks,
     @Inject(kDownloadOptions) private downloadOptions: DownloadBaseOptions,
+    @Inject(kGameDataPath) private getPath: PathResolver,
   ) {
     super(app)
   }
@@ -175,9 +179,9 @@ export class LoMUpdateService extends AbstractService {
     }
   }
 
-  async check(instancePath: string, manifestUrl: string, identity: ManagedUpdateIdentity): Promise<LoMUpdateStatus> {
-    const manifest = await this.fetchManifest(manifestUrl)
-    const state = await this.readUpdateState(instancePath, identity)
+  async check(instancePath: string, managed: ManagedInstance): Promise<LoMUpdateStatus> {
+    const manifest = await this.fetchManifest(managed.manifestUrl)
+    const state = await this.readUpdateState(instancePath, { provider: managed.provider, profileId: managed.profileId })
     const installedVersion = typeof state.version === 'string' ? state.version : undefined
     return {
       available: installedVersion !== manifest.version,
@@ -196,7 +200,7 @@ export class LoMUpdateService extends AbstractService {
     return true
   }
 
-  update(instancePath: string, manifestUrl: string, identity: ManagedUpdateIdentity): Promise<LoMUpdateResult> {
+  update(instancePath: string, managed: ManagedInstance): Promise<LoMUpdateResult> {
     const current = this.running.get(instancePath)
     if (current) return current
 
@@ -209,7 +213,7 @@ export class LoMUpdateService extends AbstractService {
     const controller = nativeTask.controller
     this.controllers.set(instancePath, controller)
 
-    const task = nativeTask.wrap(this.doUpdate(instancePath, manifestUrl, identity, controller.signal, nativeTask))
+    const task = nativeTask.wrap(this.doUpdate(instancePath, managed, controller.signal, nativeTask))
       .catch((e) => {
         if (controller.signal.aborted || isAbortError(e)) {
           this.progress.delete(instancePath)
@@ -311,8 +315,7 @@ export class LoMUpdateService extends AbstractService {
 
   private async doUpdate(
     instancePath: string,
-    manifestUrl: string,
-    identity: ManagedUpdateIdentity,
+    managed: ManagedInstance,
     signal: AbortSignal,
     task: TaskInstance<InstallInstanceTask>,
   ): Promise<LoMUpdateResult> {
@@ -320,13 +323,25 @@ export class LoMUpdateService extends AbstractService {
     task.substate = { type: 'install-instance.resolve' }
     task.progress = { total: 0, progress: 0 }
 
+    const manifestUrl = managed.manifestUrl
+    const identity: ManagedUpdateIdentity = { provider: managed.provider, profileId: managed.profileId }
     const manifest = await this.fetchManifest(manifestUrl, signal)
     if (signal.aborted) throw abortError()
 
     const previousState = await this.readUpdateState(instancePath, identity)
     const manifestBase = new URL('.', manifestUrl)
-    const pending: LoMManifestFile[] = []
-    for (const file of manifest.files) {
+    const gameDataRoot = this.getPath()
+    const pending: Array<{
+      file: LoMManifestFile
+      root: string
+      scope: 'instance' | 'runtime'
+    }> = []
+
+    const enqueueIfNeeded = async (
+      file: LoMManifestFile,
+      root: string,
+      scope: 'instance' | 'runtime',
+    ) => {
       if (!file?.path) throw new Error(`[LoM Updater] Invalid file entry: ${JSON.stringify(file)}`)
       if (file.hash && !file.hashAlgorithm) throw new Error(`[LoM Updater] Missing hash algorithm: ${file.path}`)
       if (file.hashAlgorithm === 'sha1' && file.hash && !/^[a-f0-9]{40}$/i.test(file.hash)) {
@@ -336,30 +351,33 @@ export class LoMUpdateService extends AbstractService {
         throw new Error(`[LoM Updater] Invalid MD5: ${file.path}`)
       }
 
-      // User-owned seed files are installed only when missing. Once Minecraft
-      // has created or modified them, the pack updater deliberately stops
-      // owning their contents. This keeps our initial ru_ru default without
-      // resetting GUI scale, keybinds, audio, resource packs, etc.
-      if (isUserOwnedSeedPath(file.path)) {
+      // Seed files belong to the player after their first installation.
+      if (scope === 'instance' && isUserOwnedSeedPath(file.path)) {
         try {
-          await readFile(safePath(instancePath, file.path))
+          await readFile(safePath(root, file.path))
           this.log(`[LoM Updater] Preserve user-owned file: ${file.path}`)
-          continue
+          return
         } catch { /* missing: seed it below */ }
       }
 
-      // Hashed text files accept the Git LF blob when the manifest was
-      // generated from an equivalent Windows CRLF checkout.
       if (file.hash && file.hashAlgorithm) {
         try {
-          const data = await readFile(safePath(instancePath, file.path))
-          if (validateLoMFileBytes(data, file).valid) continue
-        } catch { /* missing */ }
+          const data = await readFile(safePath(root, file.path))
+          if (validateLoMFileBytes(data, file).valid) return
+        } catch { /* missing or invalid */ }
       }
-      pending.push(file)
+
+      pending.push({ file, root, scope })
     }
 
-    const bytesTotal = pending.reduce((sum, file) => sum + (file.size || 0), 0)
+    for (const file of manifest.files) {
+      await enqueueIfNeeded(file, instancePath, 'instance')
+    }
+    for (const file of manifest.runtimeFiles ?? []) {
+      await enqueueIfNeeded(file, gameDataRoot, 'runtime')
+    }
+
+    const bytesTotal = pending.reduce((sum, entry) => sum + (entry.file.size || 0), 0)
     this.setProgress(instancePath, {
       phase: pending.length ? 'downloading' : 'installing',
       filesTotal: pending.length,
@@ -371,32 +389,41 @@ export class LoMUpdateService extends AbstractService {
     let completedBytes = 0
     let effectiveBytesTotal = bytesTotal
     const startedAt = Date.now()
-    const staged: Array<{ destination: string, temp: string }> = []
+    const staged: Array<{
+      destination: string
+      temp: string
+      scope: 'instance' | 'runtime'
+      path: string
+    }> = []
 
     try {
-      // Download and verify every file first. Nothing in the live instance is
-      // replaced while cancellation is still available.
+      // Stage and verify both instance-owned and shared runtime artifacts before
+      // replacing any live file. Runtime artifacts are written to XMCL's
+      // shared libraries/versions root, never into the instance directory.
       for (let fileOffset = 0; fileOffset < pending.length; fileOffset++) {
-        const file = pending[fileOffset]
+        const { file, root, scope } = pending[fileOffset]
         if (signal.aborted) throw abortError()
         const fileIndex = fileOffset + 1
-        this.setProgress(instancePath, { currentFile: file.path })
-        const destination = safePath(instancePath, file.path)
+        const displayPath = scope === 'runtime' ? `runtime:${file.path}` : file.path
+        this.setProgress(instancePath, { currentFile: displayPath })
+        const destination = safePath(root, file.path)
         const temp = `${destination}.lom-update`
-        const url = file.url ? new URL(file.url, manifestBase).toString() : new URL(file.path.replace(/\\/g, '/'), manifestBase).toString()
+        const url = file.url
+          ? new URL(file.url, manifestBase).toString()
+          : new URL(file.path.replace(/\\/g, '/'), manifestBase).toString()
 
         const reusableBytes = await this.getReusableStagedBytes(temp, file)
         if (reusableBytes !== undefined) {
-          staged.push({ destination, temp })
+          staged.push({ destination, temp, scope, path: file.path })
           changed++
           completedBytes += reusableBytes
           effectiveBytesTotal += reusableBytes - (file.size || reusableBytes)
           const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001)
           const bytesPerSecond = Math.round(completedBytes / seconds)
           this.setProgress(instancePath, { filesDone: changed, bytesDone: completedBytes, bytesTotal: effectiveBytesTotal, bytesPerSecond })
-          this.setTaskDownloadState(task, fileIndex, pending.length, file.path, reusableBytes, reusableBytes, 1)
+          this.setTaskDownloadState(task, fileIndex, pending.length, displayPath, reusableBytes, reusableBytes, 1)
           task.progress = { url, total: effectiveBytesTotal || completedBytes || 1, progress: completedBytes, speed: bytesPerSecond, acceptRanges: false }
-          this.log(`[LoM Updater] Reuse staged ${fileIndex}/${pending.length} ${file.path}`)
+          this.log(`[LoM Updater] Reuse staged ${fileIndex}/${pending.length} ${displayPath}`)
           continue
         }
         await unlink(temp).catch(() => undefined)
@@ -405,8 +432,8 @@ export class LoMUpdateService extends AbstractService {
         let completed = false
         for (let attempt = 1; attempt <= MAX_DOWNLOAD_ATTEMPTS; attempt++) {
           if (signal.aborted) throw abortError()
-          this.setTaskDownloadState(task, fileIndex, pending.length, file.path, 0, file.size || 0, attempt)
-          this.log(`[LoM Updater] Download ${fileIndex}/${pending.length} attempt=${attempt}/${MAX_DOWNLOAD_ATTEMPTS} ${file.path} <- ${url}`)
+          this.setTaskDownloadState(task, fileIndex, pending.length, displayPath, 0, file.size || 0, attempt)
+          this.log(`[LoM Updater] Download ${fileIndex}/${pending.length} attempt=${attempt}/${MAX_DOWNLOAD_ATTEMPTS} ${displayPath} <- ${url}`)
 
           try {
             downloaded = await this.downloadToTemp(url, temp, file, signal, (fileBytes, fileTotal, activeUrl) => {
@@ -414,7 +441,7 @@ export class LoMUpdateService extends AbstractService {
               const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001)
               const bytesPerSecond = Math.round(bytesDone / seconds)
               this.setProgress(instancePath, { bytesDone, bytesPerSecond })
-              this.setTaskDownloadState(task, fileIndex, pending.length, file.path, fileBytes, fileTotal || file.size || 0, attempt)
+              this.setTaskDownloadState(task, fileIndex, pending.length, displayPath, fileBytes, fileTotal || file.size || 0, attempt)
               task.progress = {
                 url: activeUrl || url,
                 total: effectiveBytesTotal || bytesDone || 1,
@@ -424,7 +451,7 @@ export class LoMUpdateService extends AbstractService {
               }
             })
 
-            staged.push({ destination, temp })
+            staged.push({ destination, temp, scope, path: file.path })
             changed++
             completedBytes += downloaded
             effectiveBytesTotal += downloaded - (file.size || downloaded)
@@ -466,14 +493,15 @@ export class LoMUpdateService extends AbstractService {
         }
 
         if (!completed) {
-          throw new Error(`[LoM Updater] Exhausted download attempts for ${file.path}`)
+          throw new Error(`[LoM Updater] Exhausted download attempts for ${displayPath}`)
         }
       }
 
       if (signal.aborted) throw abortError()
 
       // Installation is intentionally non-cancellable. From this point onward
-      // staged, hash-verified files are committed to the live instance.
+      // all staged files are hash-verified. Shared runtime cache entries are
+      // only replaced; they are never removed as part of pack cleanup.
       this.setProgress(instancePath, { phase: 'installing', currentFile: undefined, bytesPerSecond: 0 })
       task.substate = { type: 'install-instance.link', count: staged.length }
       task.progress = { total: staged.length || 1, progress: 0 }
@@ -485,9 +513,8 @@ export class LoMUpdateService extends AbstractService {
         task.progress = { total: staged.length || 1, progress: installed }
       }
 
-      // Remove only files that the launcher previously owned. User-added mods
-      // are never inferred as stale merely because they are absent from the
-      // remote manifest.
+      // Remove only files that this managed instance previously owned.
+      // Runtime files are shared XMCL cache and deliberately never deleted.
       const nextManagedFiles = manifest.files
         .map((file) => file.path)
         .filter((filePath) => !isUserOwnedSeedPath(filePath))
@@ -519,18 +546,25 @@ export class LoMUpdateService extends AbstractService {
         managedFiles: nextManagedFiles,
         updatedAt: new Date().toISOString(),
       }, null, 2), 'utf8')
+
+      if (manifest.runtimeVersion) {
+        const versionService = await this.app.registry.getOrCreate(VersionService)
+        await versionService.refreshVersion(manifest.runtimeVersion)
+      }
+
       this.setProgress(instancePath, { phase: 'done', error: undefined, currentFile: undefined, bytesPerSecond: 0 })
       task.progress = { total: 1, progress: 1 }
-      this.log(`[LoM Updater] Ready version=${manifest.version}, changed=${changed}, deleted=${deleted}`)
+      this.log(`[LoM Updater] Ready version=${manifest.version}, changed=${changed}, deleted=${deleted}, runtime=${manifest.runtimeFiles?.length ?? 0}`)
       return { version: manifest.version, changed, deleted }
     } catch (e) {
       // Keep fully downloaded, hash-verified staging files. A later retry can
-      // resume from them instead of redownloading hundreds of already valid
-      // pack files. Partial/current files are removed inside the retry loop.
+      // resume them instead of redownloading hundreds of valid pack/runtime
+      // files. Partial/current files are removed inside the retry loop.
       if (staged.length > 0) {
         this.log(`[LoM Updater] Keeping ${staged.length} verified staged files for retry/resume`)
       }
       throw e
     }
   }
+
 }
