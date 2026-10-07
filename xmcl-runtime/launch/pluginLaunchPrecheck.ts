@@ -18,6 +18,7 @@ import { getManagedJavaComponent, JavaService, JavaValidation } from '~/java'
 import { LaunchService } from '~/launch'
 import { PeerService } from '~/peer'
 import { LocalSkinService } from '~/user/LocalSkinService'
+import { shouldRunManagedInstanceUpdate } from './managedInstanceLaunch'
 import { linkOrCopyDirectory, missing } from '~/util/fs'
 
 export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
@@ -46,7 +47,7 @@ export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
       // Ordinary XMCL instances are entirely user-owned. Never invoke a
       // managed provider for them, even if their Minecraft/Forge versions or
       // display name happen to match an official profile.
-      if (!instance?.managed) return
+      if (!shouldRunManagedInstanceUpdate(instance)) return
 
       logger.log(`[Managed Updater] Pre-launch check for ${input.gameDirectory} provider=${instance.managed.provider} profile=${instance.managed.profileId}`)
       try {
