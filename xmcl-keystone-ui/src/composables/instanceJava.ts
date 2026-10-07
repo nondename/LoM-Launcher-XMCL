@@ -129,6 +129,8 @@ export function useInstanceJava(instance: Ref<Instance>, version: Ref<InstanceRe
     computed(() => instance.value.java),
     computed(() => instance.value.runtime.minecraft),
     computed(() => instance.value.runtime.forge),
+    computed(() => instance.value.managed?.java?.majorVersion),
+    computed(() => instance.value.managed?.java?.component),
     ...(globalJava ? [globalJava] : []),
   ], () => {
     mutate()
