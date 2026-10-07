@@ -146,11 +146,13 @@ export function useInstances() {
       // cold-start marker are migration hints only; all future ownership checks
       // use instance.managed. The authlib flag is a final fallback for the
       // canonical profile created by early LoM Launcher builds.
-      const alreadyManaged = newVal.instances.some((candidate) =>
+      const wasEmpty = newVal.instances.length === 0
+      let managedPath = newVal.instances.find((candidate) =>
         candidate.managed?.provider === LOM_MANAGED_INSTANCE.provider &&
         candidate.managed.profileId === LOM_MANAGED_INSTANCE.profileId,
-      )
-      if (!alreadyManaged) {
+      )?.path
+
+      if (!managedPath) {
         const legacy = newVal.instances.find((candidate) =>
           isLegacyLoMProfile(candidate) && (
             legacyManagedPaths.value.includes(candidate.path) ||
@@ -163,23 +165,28 @@ export function useInstances() {
             instancePath: legacy.path,
             managed: JSON.parse(JSON.stringify(LOM_MANAGED_INSTANCE)),
           })
+          managedPath = legacy.path
           legacyManagedPaths.value = legacyManagedPaths.value.filter((value) => value !== legacy.path)
           if (coldStartPendingPath.value === legacy.path) coldStartPendingPath.value = ''
         }
       }
 
-      // A brand-new LoM Launcher creates and selects the canonical managed
-      // profile, but does not download the pack until the user explicitly
-      // clicks Install/Update. Ordinary instances still use XMCL creation.
-      if (newVal.instances.length === 0) {
-        const createdPath = await createInstance({
+      // The official profile exists independently from user-created XMCL
+      // instances. Re-provision its lightweight instance metadata when missing,
+      // but never auto-download the pack or replace the user's current
+      // selection merely because they also have their own instances.
+      if (!managedPath) {
+        managedPath = await createInstance({
           name: LOM_PROFILE_NAME,
           runtime: { ...LOM_PROFILE_RUNTIME },
           managed: JSON.parse(JSON.stringify(LOM_MANAGED_INSTANCE)),
           disableAuthlibInjector: true,
         })
         coldStartPendingPath.value = ''
-        _path.value = createdPath
+      }
+
+      if (wasEmpty) {
+        _path.value = managedPath
       } else {
         const lastSelectedPath = _path.value
         if (lastSelectedPath) {
