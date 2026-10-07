@@ -72,6 +72,16 @@ jobs:
             const runtimeData = Buffer.from(await runtimeResponse.arrayBuffer())
             const runtimeValidation = validateLoMFileBytes(runtimeData, runtimeManifest)
             if (!runtimeValidation.valid) throw new Error(`Managed Forge version manifest failed integrity validation: ${JSON.stringify(runtimeValidation)}`)
+            const runtimeProfile = JSON.parse(runtimeData.toString('utf8'))
+            const runtimePaths = new Set(runtimeFiles.map((file) => file.path))
+            const missingRuntimeLibraries = (runtimeProfile.libraries ?? [])
+              .map((library) => library?.downloads?.artifact?.path)
+              .filter((path) => typeof path === 'string')
+              .map((path) => `libraries/${path}`)
+              .filter((path) => !runtimePaths.has(path))
+            if (missingRuntimeLibraries.length > 0) {
+              throw new Error(`Managed Forge runtime is incomplete: ${missingRuntimeLibraries.join(', ')}`)
+            }
             if (!manifest.files.some((file) => file.path === 'options.txt')) throw new Error('options.txt missing from normalized manifest')
 
             const securityCraft = manifest.files.find((file) => file.path.includes('SecurityCraft'))
