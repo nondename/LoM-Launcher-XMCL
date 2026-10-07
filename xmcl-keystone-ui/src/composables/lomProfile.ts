@@ -55,7 +55,7 @@ export function isManagedLoMProfile(instance: Instance | undefined) {
     !!instance.managed &&
     LOM_MANAGED_IDENTITIES.some((managed) =>
       instance.managed?.provider === managed.provider &&
-      instance.managed.profileId === managed.profileId,
+      instance.managed?.profileId === managed.profileId,
     )
 }
 
