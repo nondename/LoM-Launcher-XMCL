@@ -96,6 +96,37 @@ describe('LoM distribution adapter', () => {
     ]))
   })
 
+  it('accepts a runtime-only Lite distribution without injecting main-pack files', () => {
+    const manifest = normalizeLoMManifest({
+      version: '0.1.0',
+      servers: [{
+        id: 'Lite-1.20.1',
+        name: 'Lite',
+        version: '0.1.0-dev',
+        minecraftVersion: '1.20.1',
+        modules: [{
+          id: '1.20.1-47.4.22',
+          type: 'VersionManifest',
+          artifact: {
+            url: 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/repo/versions/1.20.1-forge-47.4.22/1.20.1-forge-47.4.22.json',
+            MD5: 'cccccccccccccccccccccccccccccccc',
+          },
+        }],
+      }],
+    }, SOURCE)
+
+    expect(manifest.version).toBe('0.1.0')
+    expect(manifest.files).toEqual([])
+    expect(manifest.runtimeVersion).toBe('1.20.1-forge-47.4.22')
+    expect(manifest.runtimeFiles).toEqual([
+      expect.objectContaining({
+        path: 'versions/1.20.1-forge-47.4.22/1.20.1-forge-47.4.22.json',
+        hash: 'cccccccccccccccccccccccccccccccc',
+      }),
+    ])
+    expect(manifest.delete).toEqual([])
+  })
+
   it('keeps compatibility with the old sha1 updater manifest format', () => {
     const manifest = normalizeLoMManifest({
       version: '2',
