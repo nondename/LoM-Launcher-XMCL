@@ -51,6 +51,9 @@ type ManagedUpdateState = {
 
 const MANAGED_STATE_FILE = '.managed-update.json'
 const LEGACY_STATE_FILE = '.lom-update.json'
+const DEFAULT_LOM_MANIFEST_URL =
+  'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
+const LOM_PROFILE_ID = 'legends-of-medieval'
 const MAX_DOWNLOAD_ATTEMPTS = 4
 const RETRY_BASE_DELAY_MS = 750
 const DOWNLOAD_PROGRESS_INTERVAL_MS = 100
@@ -152,6 +155,17 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
     this.progress.set(instancePath, { ...this.getProgress(instancePath), ...patch })
   }
 
+  private resolveManifestUrl(managed: ManagedInstance) {
+    if (managed.provider !== 'lom-distribution' || managed.profileId !== LOM_PROFILE_ID) {
+      throw new Error(`Unsupported LoM managed profile: ${managed.provider}/${managed.profileId}`)
+    }
+
+    // Never trust an arbitrary URL persisted in instance.json for shared
+    // runtime writes. The provider/profile identity selects a launcher-owned
+    // source. The environment override is retained for explicit dev/test use.
+    return process.env.LOM_UPDATE_MANIFEST_URL || DEFAULT_LOM_MANIFEST_URL
+  }
+
   private async fetchManifest(manifestUrl: string, signal?: AbortSignal): Promise<LoMManifest> {
     this.log(`[LoM Updater] Fetch manifest: ${manifestUrl}`)
     const manifestResponse = await this.app.fetch(manifestUrl, { cache: 'no-store', signal })
@@ -180,7 +194,8 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
   }
 
   async check(instancePath: string, managed: ManagedInstance): Promise<LoMUpdateStatus> {
-    const manifest = await this.fetchManifest(managed.manifestUrl)
+    const manifestUrl = this.resolveManifestUrl(managed)
+    const manifest = await this.fetchManifest(manifestUrl)
     const state = await this.readUpdateState(instancePath, { provider: managed.provider, profileId: managed.profileId })
     const installedVersion = typeof state.version === 'string' ? state.version : undefined
     const initializedManagedState =
@@ -330,7 +345,7 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
     task.substate = { type: 'install-instance.resolve' }
     task.progress = { total: 0, progress: 0 }
 
-    const manifestUrl = managed.manifestUrl
+    const manifestUrl = this.resolveManifestUrl(managed)
     const identity: ManagedUpdateIdentity = { provider: managed.provider, profileId: managed.profileId }
     const manifest = await this.fetchManifest(manifestUrl, signal)
     if (signal.aborted) throw abortError()
