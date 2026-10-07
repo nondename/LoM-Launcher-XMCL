@@ -165,8 +165,18 @@ function collectDistributionModules(
         const runtimePath = getRuntimeTargetPath(type, sourcePath)
         if (runtimePath) {
           collection.runtimeFiles.set(runtimePath, toManifestFile(artifact, runtimePath, sourceUrl))
-          if (type === 'VersionManifest' && typeof module.id === 'string' && module.id) {
-            collection.runtimeVersion = module.id
+          if (type === 'VersionManifest') {
+            // The Helios module id is not necessarily the local XMCL version
+            // id. For Forge it is currently "1.20.1-47.4.22", while the actual
+            // mirrored version directory/json is "1.20.1-forge-47.4.22".
+            // The on-disk target path is authoritative because VersionService
+            // resolves versions by that directory/json id.
+            const match = /^versions\/([^/]+)\/([^/]+)\.json$/.exec(runtimePath)
+            if (match && match[1] === match[2]) {
+              collection.runtimeVersion = match[1]
+            } else if (typeof module.id === 'string' && module.id) {
+              collection.runtimeVersion = module.id
+            }
           }
         }
       }
