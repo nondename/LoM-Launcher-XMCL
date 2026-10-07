@@ -7,10 +7,11 @@ import {
   resolveQuiltVersion,
 } from '@xmcl/runtime-api'
 import { isSystemError } from '@xmcl/utils'
-import { ensureDir, move, stat, unlink } from 'fs-extra'
+import { ensureDir, move, readFile, stat, unlink, writeFile } from 'fs-extra'
 import { join } from 'path'
 import { LauncherAppPlugin, kGameDataPath } from '~/app'
 import { InstanceService } from '~/instance'
+import { kSettings } from '~/settings'
 import { ManagedInstanceUpdateService } from '~/instanceIO/ManagedInstanceUpdateService'
 import { VersionInstallService } from '~/install/InstallService'
 import { isLinkTo, readlinkSafe } from '~/instance/utils/readLinkSafe'
@@ -20,6 +21,7 @@ import { PeerService } from '~/peer'
 import { LocalCapeService } from '~/user/LocalCapeService'
 import { LocalSkinService } from '~/user/LocalSkinService'
 import { shouldRunManagedInstanceUpdate } from './managedInstanceLaunch'
+import { patchMinecraftLanguageOption, resolveMinecraftLocale } from './minecraftLocale'
 import { linkOrCopyDirectory, missing } from '~/util/fs'
 
 export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
@@ -70,6 +72,30 @@ export const pluginLaunchPrecheck: LauncherAppPlugin = async (app) => {
           `Managed instance update failed: ${error.message}`,
           { cause: error },
         )
+      }
+    },
+  })
+
+  launchService.registerMiddleware({
+    name: 'instance-game-locale',
+    async onBeforeLaunch(input, payload) {
+      if (payload.side !== 'client') return
+
+      const settings = await app.registry.get(kSettings)
+      const locale = resolveMinecraftLocale(settings.locale, payload.version.minecraftVersion)
+      const optionsPath = join(input.gameDirectory, 'options.txt')
+
+      let current = ''
+      try {
+        current = await readFile(optionsPath, 'utf-8')
+      } catch (e) {
+        if (!isSystemError(e) || e.code !== 'ENOENT') throw e
+      }
+
+      const patched = patchMinecraftLanguageOption(current, locale)
+      if (patched !== current) {
+        await writeFile(optionsPath, patched, 'utf-8')
+        logger.log(`[Locale] Synced Minecraft language to ${locale} for ${input.gameDirectory} (launcher=${settings.locale}, minecraft=${payload.version.minecraftVersion})`)
       }
     },
   })
