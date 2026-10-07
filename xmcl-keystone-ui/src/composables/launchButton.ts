@@ -34,14 +34,6 @@ export interface LaunchMenuItem {
 export const kLaunchButton: InjectionKey<ReturnType<typeof useLaunchButton>> =
   Symbol('LaunchButton')
 
-export function hasMismatchedInstanceSnapshot(
-  currentPath: string,
-  ...snapshots: Array<string | undefined>
-) {
-  return snapshots.filter((value): value is string => !!value)
-    .some((snapshotPath) => snapshotPath !== currentPath)
-}
-
 export function useLaunchButton() {
   const { show: showLaunchStatusDialog } = useDialog(LaunchStatusDialogKey)
 
@@ -182,16 +174,10 @@ export function useLaunchButton() {
   const { t, locale } = useI18n()
   const transition = computed(() => {
     const currentPath = path.value
-    // Missing snapshots are not a transition by themselves. Their respective
-    // loading flags already block the button while a refresh is in flight.
-    // Treat only an actually-present snapshot for another instance as stale.
-    // Otherwise a perfectly installed vanilla/user instance can display
-    // "Launch" while onClick silently returns forever.
-    return hasMismatchedInstanceSnapshot(
-      currentPath,
-      instruction.value?.instance,
-      instanceInstallStatus.value?.instance,
-      javaStatus.value?.instance,
+    return (
+      currentPath !== instruction.value?.instance ||
+      currentPath !== instanceInstallStatus.value?.instance ||
+      currentPath !== javaStatus.value?.instance
     )
   })
 
@@ -562,17 +548,7 @@ export function useLaunchButton() {
    * Such rejections are intentional and not propagated.
    */
   async function onClick() {
-    if ((loading.value || transition.value) && !launching.value) {
-      console.warn('[launch-button] Ignore click while instance state is refreshing', {
-        instance: path.value,
-        loading: loading.value,
-        transition: transition.value,
-        instruction: instruction.value?.instance,
-        installStatus: instanceInstallStatus.value?.instance,
-        javaStatus: javaStatus.value?.instance,
-      })
-      return
-    }
+    if ((loading.value || transition.value) && !launching.value) return
     const instancePath = path.value
     if (!instancePath) return
     const facade = launchButtonFacade.value
