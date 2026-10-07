@@ -33,8 +33,21 @@ export type LoMUpdateProgress = {
   error?: string
 }
 
-const MANIFEST_URL = process.env.LOM_UPDATE_MANIFEST_URL
-  || 'https://raw.githubusercontent.com/nondename/Minecraft-Legends-of-Medieval/dev/distribution.json'
+export type ManagedUpdateIdentity = {
+  provider: string
+  profileId: string
+}
+
+type ManagedUpdateState = {
+  provider?: string
+  profileId?: string
+  version?: string
+  managedFiles?: string[]
+  updatedAt?: string
+}
+
+const MANAGED_STATE_FILE = '.managed-update.json'
+const LEGACY_STATE_FILE = '.lom-update.json'
 const MAX_DOWNLOAD_ATTEMPTS = 4
 const RETRY_BASE_DELAY_MS = 750
 const DOWNLOAD_PROGRESS_INTERVAL_MS = 100
@@ -113,10 +126,7 @@ async function waitForRetry(ms: number, signal: AbortSignal) {
 export class LoMUpdateService extends AbstractService {
   private running = new Map<string, Promise<LoMUpdateResult>>()
   private controllers = new Map<string, AbortController>()
-  private progress: LoMUpdateProgress = {
-    phase: 'idle', filesDone: 0, filesTotal: 0,
-    bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0,
-  }
+  private progress = new Map<string, LoMUpdateProgress>()
 
   constructor(
     @Inject(LauncherAppKey) app: LauncherApp,
@@ -126,31 +136,49 @@ export class LoMUpdateService extends AbstractService {
     super(app)
   }
 
-  getProgress(): LoMUpdateProgress {
-    return { ...this.progress }
-  }
-
-  private setProgress(patch: Partial<LoMUpdateProgress>) {
-    Object.assign(this.progress, patch)
-  }
-
-  private async fetchManifest(signal?: AbortSignal): Promise<LoMManifest> {
-    this.log(`[LoM Updater] Fetch manifest: ${MANIFEST_URL}`)
-    const manifestResponse = await this.app.fetch(MANIFEST_URL, { cache: 'no-store', signal })
-    if (!manifestResponse.ok) throw new Error(`[LoM Updater] Manifest HTTP ${manifestResponse.status}: ${MANIFEST_URL}`)
-    const rawManifest = await manifestResponse.json() as unknown
-    return normalizeLoMManifest(rawManifest, MANIFEST_URL)
-  }
-
-  async check(instancePath: string): Promise<LoMUpdateStatus> {
-    const manifest = await this.fetchManifest()
-    let installedVersion: string | undefined
-    try {
-      const state = JSON.parse(await readFile(join(instancePath, '.lom-update.json'), 'utf8')) as { version?: unknown }
-      if (typeof state.version === 'string') installedVersion = state.version
-    } catch {
-      // No local LoM updater state yet. The first update will validate files and create it.
+  getProgress(instancePath: string): LoMUpdateProgress {
+    return {
+      phase: 'idle', filesDone: 0, filesTotal: 0,
+      bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0,
+      ...(this.progress.get(instancePath) ?? {}),
     }
+  }
+
+  private setProgress(instancePath: string, patch: Partial<LoMUpdateProgress>) {
+    this.progress.set(instancePath, { ...this.getProgress(instancePath), ...patch })
+  }
+
+  private async fetchManifest(manifestUrl: string, signal?: AbortSignal): Promise<LoMManifest> {
+    this.log(`[LoM Updater] Fetch manifest: ${manifestUrl}`)
+    const manifestResponse = await this.app.fetch(manifestUrl, { cache: 'no-store', signal })
+    if (!manifestResponse.ok) throw new Error(`[LoM Updater] Manifest HTTP ${manifestResponse.status}: ${manifestUrl}`)
+    const rawManifest = await manifestResponse.json() as unknown
+    return normalizeLoMManifest(rawManifest, manifestUrl)
+  }
+
+  private async readUpdateState(instancePath: string, identity: ManagedUpdateIdentity): Promise<ManagedUpdateState> {
+    try {
+      const state = JSON.parse(await readFile(join(instancePath, MANAGED_STATE_FILE), 'utf8')) as ManagedUpdateState
+      if (state.provider !== identity.provider || state.profileId !== identity.profileId) return {}
+      return state
+    } catch {
+      // Migrate the version marker written by pre-managed LoM Launcher builds.
+      if (identity.provider === 'lom-distribution') {
+        try {
+          const legacy = JSON.parse(await readFile(join(instancePath, LEGACY_STATE_FILE), 'utf8')) as ManagedUpdateState
+          return typeof legacy.version === 'string' ? { version: legacy.version } : {}
+        } catch {
+          // First managed update.
+        }
+      }
+      return {}
+    }
+  }
+
+  async check(instancePath: string, manifestUrl: string, identity: ManagedUpdateIdentity): Promise<LoMUpdateStatus> {
+    const manifest = await this.fetchManifest(manifestUrl)
+    const state = await this.readUpdateState(instancePath, identity)
+    const installedVersion = typeof state.version === 'string' ? state.version : undefined
     return {
       available: installedVersion !== manifest.version,
       remoteVersion: manifest.version,
@@ -160,14 +188,15 @@ export class LoMUpdateService extends AbstractService {
 
   cancel(instancePath: string): boolean {
     const controller = this.controllers.get(instancePath)
-    if (!controller || !['checking', 'downloading'].includes(this.progress.phase)) return false
-    this.setProgress({ phase: 'cancelling', bytesPerSecond: 0 })
+    const currentProgress = this.getProgress(instancePath)
+    if (!controller || !['checking', 'downloading'].includes(currentProgress.phase)) return false
+    this.setProgress(instancePath, { phase: 'cancelling', bytesPerSecond: 0 })
     controller.abort()
     this.log(`[LoM Updater] Cancellation requested: ${instancePath}`)
     return true
   }
 
-  update(instancePath: string): Promise<LoMUpdateResult> {
+  update(instancePath: string, manifestUrl: string, identity: ManagedUpdateIdentity): Promise<LoMUpdateResult> {
     const current = this.running.get(instancePath)
     if (current) return current
 
@@ -180,18 +209,15 @@ export class LoMUpdateService extends AbstractService {
     const controller = nativeTask.controller
     this.controllers.set(instancePath, controller)
 
-    const task = nativeTask.wrap(this.doUpdate(instancePath, controller.signal, nativeTask))
+    const task = nativeTask.wrap(this.doUpdate(instancePath, manifestUrl, identity, controller.signal, nativeTask))
       .catch((e) => {
         if (controller.signal.aborted || isAbortError(e)) {
-          this.progress = {
-            phase: 'idle', filesDone: 0, filesTotal: 0,
-            bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0,
-          }
+          this.progress.delete(instancePath)
           this.log(`[LoM Updater] Cancelled: ${instancePath}`)
           throw e
         }
         const error = e instanceof Error ? e.message : String(e)
-        this.setProgress({ phase: 'error', error, currentFile: undefined, bytesPerSecond: 0 })
+        this.setProgress(instancePath, { phase: 'error', error, currentFile: undefined, bytesPerSecond: 0 })
         throw e
       })
       .finally(() => {
@@ -285,17 +311,20 @@ export class LoMUpdateService extends AbstractService {
 
   private async doUpdate(
     instancePath: string,
+    manifestUrl: string,
+    identity: ManagedUpdateIdentity,
     signal: AbortSignal,
     task: TaskInstance<InstallInstanceTask>,
   ): Promise<LoMUpdateResult> {
-    this.progress = { phase: 'checking', filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0 }
+    this.progress.set(instancePath, { phase: 'checking', filesDone: 0, filesTotal: 0, bytesDone: 0, bytesTotal: 0, bytesPerSecond: 0 })
     task.substate = { type: 'install-instance.resolve' }
     task.progress = { total: 0, progress: 0 }
 
-    const manifest = await this.fetchManifest(signal)
+    const manifest = await this.fetchManifest(manifestUrl, signal)
     if (signal.aborted) throw abortError()
 
-    const manifestBase = new URL('.', MANIFEST_URL)
+    const previousState = await this.readUpdateState(instancePath, identity)
+    const manifestBase = new URL('.', manifestUrl)
     const pending: LoMManifestFile[] = []
     for (const file of manifest.files) {
       if (!file?.path) throw new Error(`[LoM Updater] Invalid file entry: ${JSON.stringify(file)}`)
@@ -331,7 +360,7 @@ export class LoMUpdateService extends AbstractService {
     }
 
     const bytesTotal = pending.reduce((sum, file) => sum + (file.size || 0), 0)
-    this.setProgress({
+    this.setProgress(instancePath, {
       phase: pending.length ? 'downloading' : 'installing',
       filesTotal: pending.length,
       bytesTotal,
@@ -351,7 +380,7 @@ export class LoMUpdateService extends AbstractService {
         const file = pending[fileOffset]
         if (signal.aborted) throw abortError()
         const fileIndex = fileOffset + 1
-        this.setProgress({ currentFile: file.path })
+        this.setProgress(instancePath, { currentFile: file.path })
         const destination = safePath(instancePath, file.path)
         const temp = `${destination}.lom-update`
         const url = file.url ? new URL(file.url, manifestBase).toString() : new URL(file.path.replace(/\\/g, '/'), manifestBase).toString()
@@ -364,7 +393,7 @@ export class LoMUpdateService extends AbstractService {
           effectiveBytesTotal += reusableBytes - (file.size || reusableBytes)
           const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001)
           const bytesPerSecond = Math.round(completedBytes / seconds)
-          this.setProgress({ filesDone: changed, bytesDone: completedBytes, bytesTotal: effectiveBytesTotal, bytesPerSecond })
+          this.setProgress(instancePath, { filesDone: changed, bytesDone: completedBytes, bytesTotal: effectiveBytesTotal, bytesPerSecond })
           this.setTaskDownloadState(task, fileIndex, pending.length, file.path, reusableBytes, reusableBytes, 1)
           task.progress = { url, total: effectiveBytesTotal || completedBytes || 1, progress: completedBytes, speed: bytesPerSecond, acceptRanges: false }
           this.log(`[LoM Updater] Reuse staged ${fileIndex}/${pending.length} ${file.path}`)
@@ -384,7 +413,7 @@ export class LoMUpdateService extends AbstractService {
               const bytesDone = completedBytes + fileBytes
               const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001)
               const bytesPerSecond = Math.round(bytesDone / seconds)
-              this.setProgress({ bytesDone, bytesPerSecond })
+              this.setProgress(instancePath, { bytesDone, bytesPerSecond })
               this.setTaskDownloadState(task, fileIndex, pending.length, file.path, fileBytes, fileTotal || file.size || 0, attempt)
               task.progress = {
                 url: activeUrl || url,
@@ -401,7 +430,7 @@ export class LoMUpdateService extends AbstractService {
             effectiveBytesTotal += downloaded - (file.size || downloaded)
             const seconds = Math.max((Date.now() - startedAt) / 1000, 0.001)
             const bytesPerSecond = Math.round(completedBytes / seconds)
-            this.setProgress({ filesDone: changed, bytesDone: completedBytes, bytesTotal: effectiveBytesTotal, bytesPerSecond })
+            this.setProgress(instancePath, { filesDone: changed, bytesDone: completedBytes, bytesTotal: effectiveBytesTotal, bytesPerSecond })
             task.progress = {
               url,
               total: effectiveBytesTotal || completedBytes || 1,
@@ -424,7 +453,7 @@ export class LoMUpdateService extends AbstractService {
             if (!retryable) throw e
 
             const retryDelay = Math.min(RETRY_BASE_DELAY_MS * (2 ** (attempt - 1)), 15_000)
-            this.setProgress({ bytesDone: completedBytes, bytesPerSecond: 0 })
+            this.setProgress(instancePath, { bytesDone: completedBytes, bytesPerSecond: 0 })
             task.progress = {
               url,
               total: effectiveBytesTotal || completedBytes || 1,
@@ -445,7 +474,7 @@ export class LoMUpdateService extends AbstractService {
 
       // Installation is intentionally non-cancellable. From this point onward
       // staged, hash-verified files are committed to the live instance.
-      this.setProgress({ phase: 'installing', currentFile: undefined, bytesPerSecond: 0 })
+      this.setProgress(instancePath, { phase: 'installing', currentFile: undefined, bytesPerSecond: 0 })
       task.substate = { type: 'install-instance.link', count: staged.length }
       task.progress = { total: staged.length || 1, progress: 0 }
       let installed = 0
@@ -456,7 +485,18 @@ export class LoMUpdateService extends AbstractService {
         task.progress = { total: staged.length || 1, progress: installed }
       }
 
-      for (const relativePath of manifest.delete ?? []) {
+      // Remove only files that the launcher previously owned. User-added mods
+      // are never inferred as stale merely because they are absent from the
+      // remote manifest.
+      const nextManagedFiles = manifest.files
+        .map((file) => file.path)
+        .filter((filePath) => !isUserOwnedSeedPath(filePath))
+      const nextManagedSet = new Set(nextManagedFiles)
+      const staleManagedFiles = (previousState.managedFiles ?? [])
+        .filter((filePath) => !nextManagedSet.has(filePath))
+      const deletePaths = new Set([...(manifest.delete ?? []), ...staleManagedFiles])
+
+      for (const relativePath of deletePaths) {
         if (isUserOwnedSeedPath(relativePath)) {
           this.log(`[LoM Updater] Preserve user-owned delete target: ${relativePath}`)
           continue
@@ -465,15 +505,21 @@ export class LoMUpdateService extends AbstractService {
         try {
           await unlink(target)
           deleted++
-          this.log(`[LoM Updater] Delete ${relativePath}`)
+          this.log(`[LoM Updater] Delete managed file ${relativePath}`)
         } catch (e: any) {
           if (e?.code !== 'ENOENT') throw e
         }
       }
 
-      const statePath = join(instancePath, '.lom-update.json')
-      await writeFile(statePath, JSON.stringify({ version: manifest.version, updatedAt: new Date().toISOString() }, null, 2), 'utf8')
-      this.setProgress({ phase: 'done', error: undefined, currentFile: undefined, bytesPerSecond: 0 })
+      const statePath = join(instancePath, MANAGED_STATE_FILE)
+      await writeFile(statePath, JSON.stringify({
+        provider: identity.provider,
+        profileId: identity.profileId,
+        version: manifest.version,
+        managedFiles: nextManagedFiles,
+        updatedAt: new Date().toISOString(),
+      }, null, 2), 'utf8')
+      this.setProgress(instancePath, { phase: 'done', error: undefined, currentFile: undefined, bytesPerSecond: 0 })
       task.progress = { total: 1, progress: 1 }
       this.log(`[LoM Updater] Ready version=${manifest.version}, changed=${changed}, deleted=${deleted}`)
       return { version: manifest.version, changed, deleted }
