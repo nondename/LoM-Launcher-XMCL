@@ -64,7 +64,7 @@ jobs:
             console.log(`LoM distribution version=${manifest.version} files=${manifest.files.length} activeMods=${activeJars.length} disabledMods=${disabledJars.length} runtimeFiles=${runtimeFiles.length} runtimeVersion=${manifest.runtimeVersion ?? 'none'}`)
             if (activeJars.length < 100) throw new Error(`Suspiciously small LoM mod set: ${activeJars.length}`)
             if (runtimeFiles.length < 30) throw new Error(`Suspiciously small LoM runtime set: ${runtimeFiles.length}`)
-            if (manifest.runtimeVersion !== '1.20.1-47.4.22') throw new Error(`Unexpected LoM runtime version: ${manifest.runtimeVersion}`)
+            if (manifest.runtimeVersion !== '1.20.1-forge-47.4.22') throw new Error(`Unexpected LoM runtime version: ${manifest.runtimeVersion}`)
             const runtimeManifest = runtimeFiles.find((file) => file.path === 'versions/1.20.1-forge-47.4.22/1.20.1-forge-47.4.22.json')
             if (!runtimeManifest?.url || !runtimeManifest.hash) throw new Error('Managed Forge version manifest missing from live distribution')
             const runtimeResponse = await fetch(runtimeManifest.url, { cache: 'no-store' })
