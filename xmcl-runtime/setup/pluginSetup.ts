@@ -120,7 +120,9 @@ export const pluginSetup: LauncherAppPlugin = async (app) => {
     }
     const drives = await getAllDrived()
     return {
-      locale: app.host.getLocale(),
+      // Use the OS locale, not Electron's application locale. The latter can
+      // stay en-US in a packaged build even when Windows itself is Russian.
+      locale: app.systemLocale,
       minecraftPath: app.minecraftDataPath,
       defaultPath,
       drives,
