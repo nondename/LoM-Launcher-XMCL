@@ -46,6 +46,7 @@ type ManagedUpdateState = {
   provider?: string
   profileId?: string
   version?: string
+  runtimeVersion?: string
   managedFiles?: string[]
   updatedAt?: string
 }
@@ -241,7 +242,8 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
     const initializedManagedState =
       state.provider === managed.provider &&
       state.profileId === managed.profileId &&
-      Array.isArray(state.managedFiles)
+      Array.isArray(state.managedFiles) &&
+      state.runtimeVersion === manifest.runtimeVersion
     return {
       // A profile migrated from the legacy LoM updater must run once even when
       // the pack revision itself did not change. That first managed pass writes
@@ -600,15 +602,6 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
         }
       }
 
-      const statePath = join(instancePath, MANAGED_STATE_FILE)
-      await writeFile(statePath, JSON.stringify({
-        provider: identity.provider,
-        profileId: identity.profileId,
-        version: manifest.version,
-        managedFiles: nextManagedFiles,
-        updatedAt: new Date().toISOString(),
-      }, null, 2), 'utf8')
-
       if (manifest.runtimeVersion) {
         // Forge's version profile inherits the vanilla Minecraft profile. On a
         // completely fresh launcher the parent JSON does not exist yet, which
@@ -620,6 +613,19 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
         const versionService = await this.app.registry.getOrCreate(VersionService)
         await versionService.refreshVersion(manifest.runtimeVersion)
       }
+
+      // Commit managed ownership/version state only after every provider-owned
+      // runtime step has succeeded. A failed Forge registration must never make
+      // the next check report the pack as fully updated.
+      const statePath = join(instancePath, MANAGED_STATE_FILE)
+      await writeFile(statePath, JSON.stringify({
+        provider: identity.provider,
+        profileId: identity.profileId,
+        version: manifest.version,
+        runtimeVersion: manifest.runtimeVersion,
+        managedFiles: nextManagedFiles,
+        updatedAt: new Date().toISOString(),
+      }, null, 2), 'utf8')
 
       this.setProgress(instancePath, { phase: 'done', error: undefined, currentFile: undefined, bytesPerSecond: 0 })
       task.progress = { total: 1, progress: 1 }
