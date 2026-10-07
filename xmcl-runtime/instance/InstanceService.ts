@@ -459,8 +459,14 @@ export class InstanceService extends StatefulService<InstanceState> implements I
     const newPath = this.getCandidatePath(instance.name || basename(path))
     const newName = basename(newPath)
 
+    const duplicated = JSON.parse(JSON.stringify(instance))
+    // A duplicate is user-owned by definition. Never clone launcher-managed
+    // ownership metadata, otherwise an ordinary XMCL copy would become a
+    // second official profile and receive provider updates unexpectedly.
+    delete duplicated.managed
+
     await this.createInstance({
-      ...JSON.parse(JSON.stringify(instance)),
+      ...duplicated,
       path: newPath,
       name: newName,
     })
