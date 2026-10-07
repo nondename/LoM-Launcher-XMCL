@@ -116,16 +116,34 @@ function createLomUpdate() {
     }
   }
 
+  async function refreshAndAutoRun() {
+    const instancePath = path.value
+    await refresh()
+    if (
+      !instancePath ||
+      instancePath !== path.value ||
+      !isLoM.value ||
+      isBedrock.value ||
+      updating.value ||
+      !status.value?.available
+    ) return
+    if (
+      status.value.installedVersion &&
+      skippedRemoteVersion.value === status.value.remoteVersion
+    ) return
+    void run(instancePath)
+  }
+
   watch([path, isBedrock, isLoM], () => {
     status.value = undefined
     progress.value = idleProgress()
     checking.value = false
     skippedRemoteVersion.value = undefined
     statusRequest++
-    if (isLoM.value) void refresh()
+    if (isLoM.value) void refreshAndAutoRun()
   }, { immediate: true })
 
-  setInterval(() => { if (isLoM.value) void refresh() }, 60_000)
+  setInterval(() => { if (isLoM.value) void refreshAndAutoRun() }, 60_000)
 
   return { status, progress, checking, updating, cancellable, initialChecking, percentage, buttonText, buttonLoading, actionable, refresh, run, cancel }
 }
