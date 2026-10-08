@@ -253,11 +253,30 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
       state.profileId === managed.profileId &&
       Array.isArray(state.managedFiles) &&
       state.runtimeVersion === manifest.runtimeVersion
+    // Never report "up to date" while explicit manifest cleanup targets
+    // still exist on disk. This also heals old Lite installations where a
+    // previous launcher incorrectly left removed mods behind.
+    let pendingCleanup = false
+    for (const filePath of manifest.delete ?? []) {
+      if (isUserOwnedSeedPath(filePath)) continue
+      try {
+        await readFile(safePath(instancePath, filePath))
+        pendingCleanup = true
+        this.log(`[LoM Updater] Obsolete managed file still installed: ${filePath}`)
+        break
+      } catch (error: any) {
+        if (error?.code !== 'ENOENT') {
+          // A directory/permission problem requires a repair attempt instead
+          // of silently treating the instance as clean.
+          pendingCleanup = true
+          break
+        }
+      }
+    }
     return {
       // A profile migrated from the legacy LoM updater must run once even when
-      // the pack revision itself did not change. That first managed pass writes
-      // ownership state and installs the provider-owned Forge runtime cache.
-      available: installedVersion !== manifest.version || !initializedManagedState,
+      // the pack revision itself did not change.
+      available: installedVersion !== manifest.version || !initializedManagedState || pendingCleanup,
       remoteVersion: manifest.version,
       installedVersion,
     }
