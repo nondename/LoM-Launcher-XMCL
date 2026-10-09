@@ -98,7 +98,7 @@
             prepend-inner-icon="lock"
             persistent-hint
             :hint="hasSavedCredentials ? t('server.remoteSavedCredentialsHint') : undefined"
-            :label="form.authMethod === 'password' ? t('userServices.mojang.password') : 'Passphrase'"
+            :label="form.authMethod === 'password' ? t('userServices.mojang.password') : t('server.remoteKeyPassphrase')"
           />
           <v-checkbox
             v-model="remember"

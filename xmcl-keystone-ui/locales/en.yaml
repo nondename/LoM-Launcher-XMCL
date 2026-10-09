@@ -1812,6 +1812,7 @@ server:
   remoteAuthMethod: Authentication
   remoteAuthPassword: Password
   remoteAuthPrivateKey: Private key
+  remoteKeyPassphrase: Private key passphrase
   remoteBuildOfflinePackage: Build offline package
   remoteConnected: Connected
   remoteConnection: Connection
