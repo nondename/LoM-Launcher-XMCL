@@ -1284,6 +1284,7 @@ server:
   remoteAuthMethod: 'Способ аутентификации'
   remoteAuthPassword: 'Пароль'
   remoteAuthPrivateKey: 'Закрытый ключ'
+  remoteKeyPassphrase: 'Парольная фраза закрытого ключа'
   remoteBuildOfflinePackage: 'Создать автономный пакет'
   remoteConnected: 'Подключено'
   remoteConnection: 'Подключение'
