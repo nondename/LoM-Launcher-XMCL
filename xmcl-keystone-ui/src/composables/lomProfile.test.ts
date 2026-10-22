@@ -1,6 +1,6 @@
 import { InstanceSchema } from '@xmcl/instance'
 import { describe, expect, it } from 'vitest'
-import { isLegacyLoMProfile, isManagedLoMProfile, LITE_MANAGED_INSTANCE, LITE_PROFILE_NAME, LITE_PROFILE_RUNTIME, LOM_MANAGED_INSTANCE, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
+import { isLegacyLoMProfile, isManagedLoMProfile, LITE_MANAGED_INSTANCE, LITE_PROFILE_NAME, LITE_PROFILE_RUNTIME, NEVANILLA_MANAGED_INSTANCE, NEVANILLA_PROFILE_NAME, NEVANILLA_PROFILE_RUNTIME, LOM_MANAGED_INSTANCE, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
 
 function instance(data: Record<string, unknown>) {
   return {
@@ -40,6 +40,19 @@ describe('LoM managed profile ownership', () => {
 
     expect(isManagedLoMProfile(managed)).toBe(true)
     expect(isLegacyLoMProfile(managed)).toBe(false)
+  })
+
+  it('recognizes NeVanilla while retaining isolated ownership', () => {
+    const managed = instance({
+      name: NEVANILLA_PROFILE_NAME,
+      runtime: { ...NEVANILLA_PROFILE_RUNTIME },
+      managed: NEVANILLA_MANAGED_INSTANCE,
+    })
+
+    expect(isManagedLoMProfile(managed)).toBe(true)
+    expect(isLegacyLoMProfile(managed)).toBe(false)
+    expect(NEVANILLA_MANAGED_INSTANCE.profileId).not.toBe(LITE_MANAGED_INSTANCE.profileId)
+    expect(NEVANILLA_MANAGED_INSTANCE.manifestUrl).not.toBe(LITE_MANAGED_INSTANCE.manifestUrl)
   })
 
   it('rejects a different managed profile from the LoM updater', () => {
