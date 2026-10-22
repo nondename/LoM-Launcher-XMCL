@@ -37,7 +37,24 @@ export const LITE_MANAGED_INSTANCE: ManagedInstance = {
   },
 }
 
-const LOM_MANAGED_IDENTITIES = [LOM_MANAGED_INSTANCE, LITE_MANAGED_INSTANCE]
+export const NEVANILLA_PROFILE_NAME = 'NeVanilla'
+export const NEVANILLA_PROFILE_RUNTIME: PartialRuntimeVersions = {
+  minecraft: '1.20.1',
+  forge: '47.4.22',
+}
+
+export const NEVANILLA_MANAGED_INSTANCE: ManagedInstance = {
+  provider: 'lom-distribution',
+  profileId: 'nevanilla-lomine',
+  channel: 'stable',
+  manifestUrl: 'https://raw.githubusercontent.com/nondename/NeVanilla-LoMine/main/distribution.json',
+  java: {
+    majorVersion: 17,
+    component: 'java-runtime-gamma',
+  },
+}
+
+const LOM_MANAGED_IDENTITIES = [LOM_MANAGED_INSTANCE, LITE_MANAGED_INSTANCE, NEVANILLA_MANAGED_INSTANCE]
 
 // Renderer-local hand-off retained only for migration from older launcher
 // builds. New managed profiles persist ownership directly in instance.json.
