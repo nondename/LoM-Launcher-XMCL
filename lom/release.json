@@ -1,7 +1,7 @@
 {
     "channel": "stable",
-    "version": "1.8.11",
-    "releasedAt": "2026-10-07",
+    "version": "1.8.12",
+    "releasedAt": "2026-10-22",
     "inAppUpdate": true,
     "build": 1
 }
