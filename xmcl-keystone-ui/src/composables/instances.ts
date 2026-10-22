@@ -240,6 +240,9 @@ export function useInstances() {
       )?.path
 
       if (nevanillaPath) {
+        // Existing NeVanilla profiles from 1.8.12/1.8.13 also need the
+        // initial managed install, not only profiles created on this run.
+        if (!coldStartPendingPath.value) coldStartPendingPath.value = nevanillaPath
         const nevanillaProfile = newVal.instances.find((candidate) => candidate.path === nevanillaPath)
         const managedChanged = JSON.stringify(nevanillaProfile?.managed) !== JSON.stringify(NEVANILLA_MANAGED_INSTANCE)
         const runtimeChanged =
