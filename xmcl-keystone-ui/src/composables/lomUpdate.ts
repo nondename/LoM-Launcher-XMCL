@@ -53,6 +53,11 @@ function createLomUpdate() {
     return undefined
   })
 
+  // Surface the provider's actual failure instead of an opaque retry label.
+  const failureMessage = computed(() => progress.value.phase === 'error'
+    ? (progress.value.error || 'Неизвестная ошибка установки')
+    : undefined)
+
   const buttonLoading = computed(() => isLoM.value && (initialChecking.value || ['checking', 'cancelling', 'installing'].includes(progress.value.phase)))
   const actionable = computed(() => isLoM.value && (cancellable.value || progress.value.phase === 'error' || (!!status.value?.available && !buttonLoading.value && !(!!status.value.installedVersion && skippedRemoteVersion.value === status.value.remoteVersion))))
 
@@ -127,7 +132,7 @@ function createLomUpdate() {
 
   setInterval(() => { if (isLoM.value) void refresh() }, 60_000)
 
-  return { status, progress, checking, updating, cancellable, initialChecking, percentage, buttonText, buttonLoading, actionable, refresh, run, cancel }
+  return { status, progress, checking, updating, cancellable, initialChecking, percentage, buttonText, buttonLoading, failureMessage, actionable, refresh, run, cancel }
 }
 
 export function useLomUpdate() {
