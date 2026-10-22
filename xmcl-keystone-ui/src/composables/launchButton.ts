@@ -385,6 +385,13 @@ export function useLaunchButton() {
             }
           },
         }
+      } else if (isManagedLoMProfile(instance.value) && !lomUpdateStatus.value) {
+        launchButtonFacade.value = {
+          text: 'Проверка сборки…',
+          color: 'primary',
+          skipPreclick: true,
+          onClick: async (instancePath) => { await refreshLomUpdate() },
+        }
       } else if (lomUpdateButtonText.value) {
         const failed = lomUpdateProgress.value.phase === 'error'
         launchButtonFacade.value = {
