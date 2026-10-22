@@ -44,7 +44,7 @@ function createLomUpdate() {
       case 'downloading': return percentage.value > 0 ? `Отменить загрузку (${percentage.value}%)` : 'Отменить загрузку'
       case 'cancelling': return 'Отмена…'
       case 'installing': return 'Установка…'
-      case 'error': return status.value?.installedVersion ? 'Повторить обновление' : 'Повторить установку'
+      case 'error': return `Ошибка: ${(progress.value.error || 'Неизвестная причина').slice(0, 95)} · Повторить`
     }
     if (status.value?.available) {
       if (status.value.installedVersion && skippedRemoteVersion.value === status.value.remoteVersion) return undefined
