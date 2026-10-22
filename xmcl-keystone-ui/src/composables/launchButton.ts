@@ -187,7 +187,9 @@ export function useLaunchButton() {
     await refreshLomUpdate()
     if (path.value !== instancePath || !isManagedLoMProfile(instance.value)) return false
 
-    if (lomUpdateStatus.value?.available) {
+    // A fresh profile has no cached status yet. Do not silently treat a failed
+    // manifest check as a completed install: invoke the updater directly.
+    if (!lomUpdateStatus.value || lomUpdateStatus.value.available) {
       await runLomUpdate(instancePath)
     }
 
