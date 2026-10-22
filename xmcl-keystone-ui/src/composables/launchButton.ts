@@ -403,6 +403,15 @@ export function useLaunchButton() {
           leftIcon: 'play_arrow',
           actionName: 'user_action.minecraft.launch',
           onClick: async (instancePath, action) => {
+            // A newly provisioned managed profile may have no native XMCL
+            // issues even though its distribution has never been installed.
+            // Never launch it before synchronizing its manifest.
+            if (isManagedLoMProfile(instance.value)) {
+              await runLomUpdate(instancePath)
+              if (path.value !== instancePath || lomUpdateProgress.value.phase === 'error') return
+              await refreshLomUpdate()
+              if (lomUpdateStatus.value?.available !== false) return
+            }
             await fixInstanceFileIssue(instancePath, action)
             if (path.value !== instancePath) return
             if (javaIssue.value) {
