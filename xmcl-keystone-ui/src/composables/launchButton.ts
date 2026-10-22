@@ -43,6 +43,7 @@ export function useLaunchButton() {
   const coldStartPendingPath = useLocalStorage(LOM_COLD_START_PENDING_KEY, '' as string)
   const {
     status: lomUpdateStatus,
+    checking: lomUpdateChecking,
     progress: lomUpdateProgress,
     buttonText: lomUpdateButtonText,
     buttonLoading: lomUpdateButtonLoading,
@@ -489,6 +490,23 @@ export function useLaunchButton() {
 
     if (lomUpdateProgress.value.phase === 'error') return
 
+    if (!lomUpdateStatus.value && !lomUpdateChecking.value) {
+      const attempt = `initial:${instancePath}`
+      if (lastColdStartAttempt === attempt) return
+      lastColdStartAttempt = attempt
+      coldStartRunning = true
+      try {
+        const ready = await continueLoMInstall(instancePath)
+        if (ready && coldStartPendingPath.value === instancePath) {
+          coldStartPendingPath.value = ''
+          lastColdStartAttempt = ''
+        }
+      } finally {
+        coldStartRunning = false
+      }
+      return
+    }
+
     if (lomUpdateActionable.value) {
       const attempt = `update:${instancePath}:${lomUpdateStatus.value?.remoteVersion ?? 'unknown'}`
       if (lastColdStartAttempt === attempt) return
@@ -528,6 +546,7 @@ export function useLaunchButton() {
       issues,
       lomUpdateActionable,
       lomUpdateStatus,
+      lomUpdateChecking,
       () => lomUpdateProgress.value.phase,
     ],
     () => { void driveLoMColdStart() },
