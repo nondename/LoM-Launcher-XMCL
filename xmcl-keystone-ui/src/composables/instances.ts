@@ -253,12 +253,13 @@ export function useInstances() {
           })
         }
       } else {
-        await createInstance({
+        const createdNeVanillaPath = await createInstance({
           name: NEVANILLA_PROFILE_NAME,
           runtime: { ...NEVANILLA_PROFILE_RUNTIME },
           managed: JSON.parse(JSON.stringify(NEVANILLA_MANAGED_INSTANCE)),
           disableAuthlibInjector: true,
         })
+        if (!coldStartPendingPath.value) coldStartPendingPath.value = createdNeVanillaPath
       }
 
       if (wasEmpty) {
