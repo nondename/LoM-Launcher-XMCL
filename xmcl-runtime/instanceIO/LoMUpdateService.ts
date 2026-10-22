@@ -59,6 +59,9 @@ const DEFAULT_LITE_MANIFEST_URL =
   'https://raw.githubusercontent.com/nondename/LoM_Lite/dev/distribution.json'
 const LOM_PROFILE_ID = 'legends-of-medieval'
 const LITE_PROFILE_ID = 'legends-of-medieval-lite'
+const NEVANILLA_PROFILE_ID = 'nevanilla-lomine'
+const DEFAULT_NEVANILLA_MANIFEST_URL =
+  'https://raw.githubusercontent.com/nondename/NeVanilla-LoMine/main/distribution.json'
 const MAX_DOWNLOAD_ATTEMPTS = 4
 const RETRY_BASE_DELAY_MS = 750
 const DOWNLOAD_PROGRESS_INTERVAL_MS = 100
@@ -173,6 +176,9 @@ export class LoMUpdateService extends AbstractService implements ManagedInstance
     }
     if (managed.profileId === LITE_PROFILE_ID) {
       return process.env.LOM_LITE_UPDATE_MANIFEST_URL || DEFAULT_LITE_MANIFEST_URL
+    }
+    if (managed.profileId === NEVANILLA_PROFILE_ID) {
+      return process.env.LOM_NEVANILLA_UPDATE_MANIFEST_URL || DEFAULT_NEVANILLA_MANIFEST_URL
     }
     throw new Error(`Unsupported LoM managed profile: ${managed.provider}/${managed.profileId}`)
   }
