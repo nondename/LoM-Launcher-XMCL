@@ -6,7 +6,7 @@ import { useService } from './service'
 import { useState } from './syncableState'
 import { InstanceOrGroupData } from './instanceGroup'
 import { kUserContext } from './user'
-import { isLegacyLoMProfile, LITE_MANAGED_INSTANCE, LITE_PROFILE_NAME, LITE_PROFILE_RUNTIME, LOM_COLD_START_PENDING_KEY, LOM_LEGACY_MANAGED_INSTANCE_PATHS_KEY, LOM_MANAGED_INSTANCE, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
+import { isLegacyLoMProfile, LITE_MANAGED_INSTANCE, LITE_PROFILE_NAME, LITE_PROFILE_RUNTIME, NEVANILLA_MANAGED_INSTANCE, NEVANILLA_PROFILE_NAME, NEVANILLA_PROFILE_RUNTIME, LOM_COLD_START_PENDING_KEY, LOM_LEGACY_MANAGED_INSTANCE_PATHS_KEY, LOM_MANAGED_INSTANCE, LOM_PROFILE_NAME, LOM_PROFILE_RUNTIME } from './lomProfile'
 
 export const kInstances: InjectionKey<ReturnType<typeof useInstances>> = Symbol('Instances')
 
@@ -229,6 +229,34 @@ export function useInstances() {
           name: LITE_PROFILE_NAME,
           runtime: { ...LITE_PROFILE_RUNTIME },
           managed: JSON.parse(JSON.stringify(LITE_MANAGED_INSTANCE)),
+          disableAuthlibInjector: true,
+        })
+      }
+
+      // NeVanilla has an isolated managed identity and distribution.
+      const nevanillaPath = newVal.instances.find((candidate) =>
+        candidate.managed?.provider === NEVANILLA_MANAGED_INSTANCE.provider &&
+        candidate.managed.profileId === NEVANILLA_MANAGED_INSTANCE.profileId,
+      )?.path
+
+      if (nevanillaPath) {
+        const nevanillaProfile = newVal.instances.find((candidate) => candidate.path === nevanillaPath)
+        const managedChanged = JSON.stringify(nevanillaProfile?.managed) !== JSON.stringify(NEVANILLA_MANAGED_INSTANCE)
+        const runtimeChanged =
+          nevanillaProfile?.runtime.minecraft !== NEVANILLA_PROFILE_RUNTIME.minecraft ||
+          nevanillaProfile?.runtime.forge !== NEVANILLA_PROFILE_RUNTIME.forge
+        if (managedChanged || runtimeChanged) {
+          await editInstance({
+            instancePath: nevanillaPath,
+            ...(managedChanged ? { managed: JSON.parse(JSON.stringify(NEVANILLA_MANAGED_INSTANCE)) } : {}),
+            ...(runtimeChanged ? { runtime: { ...NEVANILLA_PROFILE_RUNTIME } } : {}),
+          })
+        }
+      } else {
+        await createInstance({
+          name: NEVANILLA_PROFILE_NAME,
+          runtime: { ...NEVANILLA_PROFILE_RUNTIME },
+          managed: JSON.parse(JSON.stringify(NEVANILLA_MANAGED_INSTANCE)),
           disableAuthlibInjector: true,
         })
       }
